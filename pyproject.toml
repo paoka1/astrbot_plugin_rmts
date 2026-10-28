@@ -1,5 +1,5 @@
 [project]
-name = "qqbot"
+name = "rmts_astrbot"
 version = "0.1.0"
 description = "QQ 机器人（SnowLuma + AstrBot）的插件代码"
 readme = "README.md"

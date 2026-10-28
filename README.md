@@ -1,4 +1,4 @@
-# qqbot
+# rmts_astrbot
 
 部署在 `ubuntu@192.168.12.136` 上的 QQ 机器人（SnowLuma + AstrBot）的插件代码。
 
