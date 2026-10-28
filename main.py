@@ -20,12 +20,17 @@ from .weather import WeatherError, get_forecast_text
 
 PLUGIN_NAME = "astrbot_plugin_rmts"
 RESOURCES = Path(__file__).parent / "resources"
-# 记忆和表情包放在 data/plugin_data/<插件名>/ 下，更新或重装插件不会丢
+# 记忆放在 data/plugin_data/<插件名>/ 下，更新或重装插件不会丢
 DATA_DIR = StarTools.get_data_dir(PLUGIN_NAME)
-# 表情包不随插件分发，由用户放入此目录（*.png，文件名即表情名），重载插件后生效
-STICKER_DIR = DATA_DIR / "stickers"
-STICKER_DIR.mkdir(exist_ok=True)
-STICKERS = sorted(p.stem for p in STICKER_DIR.glob("*.png"))
+# 表情包：插件自带 resources/stickers，用户可在数据目录的 stickers 下追加或同名覆盖
+# （*.png，文件名即表情名），重载插件后生效
+USER_STICKER_DIR = DATA_DIR / "stickers"
+USER_STICKER_DIR.mkdir(exist_ok=True)
+STICKERS = {
+    p.stem: p
+    for d in (RESOURCES / "stickers", USER_STICKER_DIR)
+    for p in sorted(d.glob("*.png"))
+}
 
 # 被戳时交给模型的话，移植自 rmts/plugins/chat/__init__.py
 POKE_MSGS = [
@@ -167,11 +172,11 @@ class Main(Star):
     async def send_sticker(self, event: AstrMessageEvent, type: str):
         if type not in STICKERS:
             return f"表情 {type} 不存在"
-        await event.send(MessageChain().file_image(str(STICKER_DIR / f"{type}.png")))
+        await event.send(MessageChain().file_image(str(STICKERS[type])))
         return f"已向博士发送表情 {type}"
 
     # 可选表情要写进工具说明，所以说明在加载时按表情目录生成
-    send_sticker.__doc__ = f"""向博士发送一个迷迭香表情包。可选表情：{"、".join(STICKERS) or "（当前没有表情，不要调用）"}
+    send_sticker.__doc__ = f"""向博士发送一个迷迭香表情包。可选表情：{"、".join(sorted(STICKERS)) or "（当前没有表情，不要调用）"}
 
 Args:
     type(string): 表情名称，必须是上面列出的其中一个

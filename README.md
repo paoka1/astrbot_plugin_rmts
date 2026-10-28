@@ -13,7 +13,7 @@
 | `web_search` | 「在终端浏览器上搜索」，调用 DeepSeek Search API |
 | `add_doctor_info` / `get_doctor_all_info` | 记下 / 读取某位博士的个人信息（只能记录说话者本人） |
 | `add_global_info` / `get_global_all_info` | 记下 / 读取当前群的全局信息 |
-| `send_sticker` | 发送表情包（需自行放入表情图片，见下文） |
+| `send_sticker` | 发送迷迭香表情包（自带 39 个，可自行追加） |
 | `poke_doctor` | 戳一戳指定博士（私聊时只能戳正在聊天的人） |
 
 另外：
@@ -40,18 +40,26 @@
 | `sender_info_enabled` | 是否在消息前拼上发送者名字和 QQ 号，默认开启。关闭后请开启 AstrBot 的「用户识别」，否则戳一戳、个人记忆拿不到 QQ 号 |
 | `memory_max_length` | 每份记忆的最大总字数，默认 300，超出时丢弃最早的 |
 
+## 人格
+
+[`persona/rosmontis.md`](persona/rosmontis.md) 是配套的迷迭香人格提示词。插件不会自动创建或切换人格，需要的话在 AstrBot WebUI 的「人格设定」中新建人格，把文件内容粘贴为系统提示词，再在配置中设为默认人格。
+
+插件的工具说明里已经写好了使用规则（如查天气缺地点时先读记忆、干员用正式名称、查询结果不记入记忆），人格提示词里不需要再写函数调用规则。
+
 ## 表情包
 
-插件不附带表情图片。把 PNG 图片放到 AstrBot 的 `data/plugin_data/astrbot_plugin_rmts/stickers/` 目录，**文件名就是表情名**（例如 `摸摸博士.png`），然后在 WebUI 重载插件，模型即可按名字发送。目录为空时模型不会调用该工具。
+插件自带 39 个迷迭香表情（`resources/stickers/`），作者为 [CoconutCorn](https://www.pixiv.net/users/64509815)。
+
+想追加或替换表情，把 PNG 图片放到 AstrBot 的 `data/plugin_data/astrbot_plugin_rmts/stickers/` 目录，**文件名就是表情名**（例如 `摸摸博士.png`，与自带表情同名时会覆盖），然后在 WebUI 重载插件，模型即可按名字发送。
 
 ## 使用提示
 
-- 插件的工具说明里写好了使用规则（如查天气缺地点时先读记忆、干员用正式名称、查询结果不记入记忆），人格提示词里不需要再写函数调用规则
 - DeepSeek API 中只有 `deepseek-flash` 支持图片输入。主模型用 `deepseek-v4-pro` 时，可在 AstrBot 中把 `deepseek-flash` 设为「默认图片转述模型」，并去掉主模型的图片模态
 
 ## 数据来源与致谢
 
 - [rmts_bot](https://github.com/paoka1/rmts_bot)：本插件的原始实现
+- [CoconutCorn](https://www.pixiv.net/users/64509815)：迷迭香表情包作者，表情图片版权归作者所有
 - [ArknightsGameData](https://github.com/Kengxxiao/ArknightsGameData)：干员档案原始数据，经 LLM 总结为 `resources/operators_info.json`
 - [PRTS wiki](https://prts.wiki/)：干员生日数据 `resources/birthday.json`
 - [amap-weather](https://github.com/Simoon-F/amap-weather)：天气查询实现参考
@@ -61,4 +69,4 @@
 
 ## 许可证
 
-[AGPL-3.0](LICENSE)
+代码与人格提示词采用 [AGPL-3.0](LICENSE)。表情图片的版权归 CoconutCorn 所有，不在 AGPL-3.0 授权范围内。
