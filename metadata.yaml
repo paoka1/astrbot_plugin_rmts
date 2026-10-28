@@ -1,0 +1,17 @@
+name: astrbot_plugin_rmts
+display_name: 迷迭香工具箱
+short_desc: 明日方舟迷迭香角色的工具集：干员资料、天气、搜索、记忆、表情、戳一戳
+desc: |
+  从 rmts（NoneBot2 迷迭香机器人）迁移的工具集，为模型提供 function calling 工具：
+  干员生日 / 档案查询、高德天气、DeepSeek 网页搜索、个人与群全局记忆、表情包、戳一戳；
+  被戳时触发对话，并在消息前拼上发送者的名字和 QQ 号。
+version: 1.0.0
+author: paoka1
+repo: https://github.com/paoka1/astrbot_plugin_rmts
+astrbot_version: ">=4.29"
+support_platforms:
+  - aiocqhttp
+tags:
+  - 明日方舟
+  - 角色扮演
+  - 工具

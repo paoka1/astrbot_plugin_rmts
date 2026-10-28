@@ -3,10 +3,9 @@
 与原版的区别：每次写入后立即落盘（原版只在 Bot 关闭时保存）
 """
 
-import json
 import asyncio
+import json
 from pathlib import Path
-from typing import Dict, List
 
 
 class MemoryStore:
@@ -19,7 +18,7 @@ class MemoryStore:
         self.data_dir = data_dir
         self.max_length = max_length
         self._lock = asyncio.Lock()
-        self.memories: Dict[str, Dict[str, List[str]]] = {}
+        self.memories: dict[str, dict[str, list[str]]] = {}
         self._load()
 
     def _file(self, scope: str) -> Path:
@@ -32,12 +31,15 @@ class MemoryStore:
             self.memories[scope] = {k: v.get("memories", []) for k, v in data.items()}
 
     def _save(self, scope: str) -> None:
-        data = {k: {"max_length": self.max_length, "memories": v} for k, v in self.memories.get(scope, {}).items()}
+        data = {
+            k: {"max_length": self.max_length, "memories": v}
+            for k, v in self.memories.get(scope, {}).items()
+        }
         tmp = self._file(scope).with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self._file(scope))
 
-    async def add(self, scope: str, owner: str, items: List[str]) -> None:
+    async def add(self, scope: str, owner: str, items: list[str]) -> None:
         async with self._lock:
             unit = self.memories.setdefault(scope, {}).setdefault(owner, [])
             unit.extend(str(i) for i in items)
@@ -46,6 +48,6 @@ class MemoryStore:
                 unit.pop(0)
             self._save(scope)
 
-    async def get(self, scope: str, owner: str) -> List[str]:
+    async def get(self, scope: str, owner: str) -> list[str]:
         async with self._lock:
             return list(self.memories.get(scope, {}).get(owner, []))

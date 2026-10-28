@@ -1,0 +1,25 @@
+{
+  "amap_weather_api_key": {
+    "type": "string",
+    "description": "高德开放平台 Web API Key（天气查询）",
+    "hint": "在 https://console.amap.com 申请「Web服务」类型的 Key；留空则天气查询不可用",
+    "default": ""
+  },
+  "search_provider_id": {
+    "type": "string",
+    "description": "网页搜索使用的 DeepSeek 模型提供商 ID",
+    "hint": "网页搜索调用 DeepSeek Search API，复用该模型提供商的 API Key，例如 deepseek/deepseek-v4-pro；留空则使用当前会话正在用的模型提供商（需为 DeepSeek）",
+    "default": ""
+  },
+  "sender_info_enabled": {
+    "type": "bool",
+    "description": "在消息前拼上发送者的名字和 QQ 号",
+    "hint": "形如「博士（TA的名字是：xx，TA的ID是xx）对你说：…」。戳一戳、个人记忆等工具需要模型知道对方的 QQ 号；关闭后请改为开启 AstrBot 的「用户识别」",
+    "default": true
+  },
+  "memory_max_length": {
+    "type": "int",
+    "description": "每位博士 / 每个群全局记忆的最大总字数，超出时丢弃最早的记忆",
+    "default": 300
+  }
+}
