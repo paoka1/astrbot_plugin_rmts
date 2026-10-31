@@ -19,7 +19,30 @@
   },
   "memory_max_length": {
     "type": "int",
-    "description": "每位博士 / 每个群全局记忆的最大总字数，超出时丢弃最早的记忆",
-    "default": 300
+    "description": "每位博士画像 / 每个群信息的字数上限，夜间整理时压到上限内",
+    "default": 500
+  },
+  "diary_time": {
+    "type": "string",
+    "description": "每天写日记和整理记忆的时间",
+    "hint": "HH:MM 格式，按 Bot 所在时区运行，默认 04:00 整理前一天的记录；失败的记录会留到下次",
+    "default": "04:00"
+  },
+  "memory_provider_id": {
+    "type": "string",
+    "description": "写日记和整理记忆使用的模型提供商 ID",
+    "hint": "留空则使用当前会话的聊天模型提供商",
+    "default": ""
+  },
+  "diary_inject_count": {
+    "type": "int",
+    "description": "每次对话注入最近几篇日记，0 表示不注入",
+    "default": 1
+  },
+  "diary_input_max_chars": {
+    "type": "int",
+    "description": "夜间整理读取当天消息的字数预算",
+    "hint": "优先保留和迷迭香的对话，其余群聊均匀抽样；和她的对话也超出预算时保留最近的部分",
+    "default": 20000
   }
 }

@@ -1,0 +1,83 @@
+from rmts.diary import (
+    DailyLog,
+    DiaryEntry,
+    DiaryStore,
+    LogEntry,
+    keep_text,
+    sample_for_diary,
+)
+
+
+def test_log_merge_cutoff_and_clear(tmp_path):
+    logs = DailyLog(tmp_path)
+    logs.append("123", "umo:g", LogEntry(10, "42", "小明", "迷迭香在吗", msg_id="m1"))
+    logs.append(
+        "123",
+        "umo:g",
+        LogEntry(11, "42", "小明", "迷迭香在吗", to_her=True, msg_id="m1"),
+    )
+    logs.append("123", "umo:g", LogEntry(12, "bot", "迷迭香", "在的……", is_self=True))
+    with (tmp_path / "123.jsonl").open("a", encoding="utf-8") as f:
+        f.write("坏行\n")
+    umo, entries = logs.load("123", 11)
+    assert (
+        umo == "umo:g"
+        and len(entries) == 1
+        and entries[0].to_her
+        and entries[0].ts == 10
+    )
+    logs.clear("123", 11)
+    assert logs.load("123", 100)[1][0].is_self
+    logs.clear("123", 100)
+    assert logs.scopes() == [] and logs.load("123", 100) == ("", [])
+
+
+def test_log_cap(tmp_path):
+    logs = DailyLog(tmp_path, max_entries=3)
+    for ts in range(1, 6):
+        logs.append("1", "umo", LogEntry(ts, "42", "a", "内容"))
+    assert [e.ts for e in logs.load("1", 4)[1]] == [2, 3, 4]
+    for ts in range(6, 30):
+        logs.append("1", "umo", LogEntry(ts, "42", "a", "内容"))
+    assert len((tmp_path / "1.jsonl").read_text(encoding="utf-8").splitlines()) <= 6
+
+
+def test_keep_text_and_sample():
+    assert not keep_text("  ", True) and not keep_text("1", False)
+    assert keep_text("1", True) and keep_text("哈哈", False)
+    her = [LogEntry(i * 100, "42", "a", "对她说" * 5, to_her=True) for i in range(3)]
+    others = [LogEntry(i, "43", "b", "群聊消息内容") for i in range(1000)]
+    out = sample_for_diary(her + others, 2000)
+    assert all(e in out for e in her)
+    assert sum(len(e.text) for e in out) <= 2000
+    kept = [e.ts for e in out if not e.to_her]
+    assert kept[0] < 100 and kept[-1] > 900
+    assert [e.ts for e in out] == sorted(e.ts for e in out)
+    assert sample_for_diary(her, 1000) == her
+    assert sample_for_diary(her, 20) == [her[-1]]
+    assert sample_for_diary(her, 0) == []
+
+
+def test_diary_storage_and_search(tmp_path):
+    store = DiaryStore(tmp_path)
+    store.put(
+        "1", DiaryEntry("2026-10-09", "小明说考试很累", "小明考试", ["小明", "考试"])
+    )
+    store.put(
+        "1",
+        DiaryEntry("2026-10-01", "小明抽卡出了新干员", "小明抽卡", ["小明", "抽卡"]),
+    )
+    store.put("1", DiaryEntry("2026-10-05", "今天下雨", "下雨", ["天气"]))
+    assert [d.date for d in store.latest("1", 2)] == ["2026-10-05", "2026-10-09"]
+    assert [h.entry.date for h in store.search("1", ["小明", "抽卡"])] == [
+        "2026-10-01",
+        "2026-10-09",
+    ]
+    assert "抽卡" in store.search("1", ["抽卡"])[0].snippet
+    assert store.search("1", ["小明"], start="2026-10-05")[0].entry.date == "2026-10-09"
+    assert store.search("1", ["小明"], end="2026-10-05")[0].entry.date == "2026-10-01"
+    assert store.search("1", ["不存在", " "]) == store.search("2", ["小明"]) == []
+    store.put("1", DiaryEntry("2026-10-05", "DeepSeek 聊天", "模型", ["AI"]))
+    assert DiaryStore(tmp_path).get("1", "2026-10-05").text == "DeepSeek 聊天"
+    assert store.get("2", "2026-10-05") is None and store.latest("1", 0) == []
+    assert len(store.search("1", ["DEEPSEEK", "deepseek", "AI"], limit=1)) == 1
