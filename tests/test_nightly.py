@@ -3,9 +3,9 @@ import json
 from datetime import datetime
 
 import pytest
-from rmts.diary import DailyLog, DiaryEntry, DiaryStore, LogEntry
-from rmts.memory import MemoryStore
-from rmts.nightly import (
+from rmts.core.diary import DailyLog, DiaryEntry, DiaryStore, LogEntry
+from rmts.core.memory import MemoryStore
+from rmts.core.nightly import (
     diary_date_for,
     next_run,
     parse_json_reply,

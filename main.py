@@ -19,12 +19,12 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import json_response, request
 
-from .diary import DailyLog, DiaryStore, LogEntry, keep_text
-from .memory import MemoryStore, cap_facts, render_memory_block, visible_facts
-from .nightly import LLM, next_run, run_nightly
-from .panel import build_overview, diary_payload
-from .search import SearchError, search_text
-from .weather import WeatherError, get_forecast_text
+from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text
+from .core.memory import MemoryStore, cap_facts, render_memory_block, visible_facts
+from .core.nightly import LLM, next_run, run_nightly
+from .core.panel import build_overview, diary_payload
+from .core.search import SearchError, search_text
+from .core.weather import WeatherError, get_forecast_text
 
 PLUGIN_NAME = "astrbot_plugin_rmts"
 RESOURCES = Path(__file__).parent / "resources"

@@ -2,7 +2,7 @@ import asyncio
 import json
 
 import pytest
-from rmts.memory import (
+from rmts.core.memory import (
     Fact,
     FactOps,
     MemoryStore,

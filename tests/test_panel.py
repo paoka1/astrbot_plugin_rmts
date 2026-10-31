@@ -1,8 +1,8 @@
 import asyncio
 
-from rmts.diary import DailyLog, DiaryEntry, DiaryStore, LogEntry
-from rmts.memory import MemoryStore
-from rmts.panel import build_overview, diary_payload
+from rmts.core.diary import DailyLog, DiaryEntry, DiaryStore, LogEntry
+from rmts.core.memory import MemoryStore
+from rmts.core.panel import build_overview, diary_payload
 
 TODAY = "2026-10-31"
 

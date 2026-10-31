@@ -1,4 +1,4 @@
-from rmts.diary import (
+from rmts.core.diary import (
     DailyLog,
     DiaryEntry,
     DiaryStore,
