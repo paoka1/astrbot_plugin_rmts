@@ -200,7 +200,7 @@ def test_render_memory_block():
     assert all(
         text in block
         for text in [
-            "迷迭香终端里的记录",
+            "迷迭香终端上的记事",
             "#1",
             "很久以前",
             "很温柔",

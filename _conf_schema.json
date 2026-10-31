@@ -17,6 +17,12 @@
     "hint": "形如「博士（TA的名字是：xx，TA的ID是xx）对你说：…」。戳一戳、个人记忆等工具需要模型知道对方的 QQ 号；关闭后请改为开启 AstrBot 的「用户识别」",
     "default": true
   },
+  "persona_sync_enabled": {
+    "type": "bool",
+    "description": "自动创建和更新人格「迷迭香（rmts）」",
+    "hint": "启动时没有就创建；插件更新了人格而你没改过时自动换成新版，改过则只在日志里提示。关闭后需自己维护人格",
+    "default": true
+  },
   "memory_max_length": {
     "type": "int",
     "description": "每位博士画像 / 每个群信息的字数上限，夜间整理时压到上限内",

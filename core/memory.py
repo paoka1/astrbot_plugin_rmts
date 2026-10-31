@@ -258,7 +258,7 @@ def render_memory_block(
         return lines or ["（还没有记录）"]
 
     lines = [
-        "【迷迭香终端里的记录】",
+        "【迷迭香终端上的记事】",
         f"正在说话的博士 {speaker_name}({speaker_qq})：",
         *lines_for(speaker, speaker_facts),
     ]

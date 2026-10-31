@@ -23,11 +23,13 @@ from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text
 from .core.memory import MemoryStore, cap_facts, render_memory_block, visible_facts
 from .core.nightly import LLM, next_run, run_nightly
 from .core.panel import build_overview, diary_payload
+from .core.persona import PERSONA_ID, PersonaState, sync_action
 from .core.search import SearchError, search_text
 from .core.weather import WeatherError, get_forecast_text
 
 PLUGIN_NAME = "astrbot_plugin_rmts"
 RESOURCES = Path(__file__).parent / "resources"
+PERSONA_FILE = Path(__file__).parent / "persona" / "rosmontis.md"
 # 记忆放在 data/plugin_data/<插件名>/ 下，更新或重装插件不会丢
 DATA_DIR = StarTools.get_data_dir(PLUGIN_NAME)
 # 表情包：插件自带 resources/stickers，用户可在数据目录的 stickers 下追加或同名覆盖
@@ -111,6 +113,40 @@ class Main(Star):
             ("consolidate", self.api_consolidate, ["POST"], "立即写日记并整理记忆"),
         ):
             context.register_web_api(f"/{PLUGIN_NAME}/{route}", handler, methods, desc)
+
+    async def initialize(self) -> None:
+        if not self.config.get("persona_sync_enabled", True):
+            return
+        try:
+            await self._sync_persona()
+        except Exception as e:  # noqa: BLE001 — 人格同步失败不影响其他功能
+            logger.error(f"[rmts] 同步人格失败: {e}")
+
+    async def _sync_persona(self) -> None:
+        shipped = PERSONA_FILE.read_text(encoding="utf-8")
+        manager = self.context.persona_manager
+        current = next(
+            (
+                p.system_prompt
+                for p in await manager.get_all_personas()
+                if p.persona_id == PERSONA_ID
+            ),
+            None,
+        )
+        state = PersonaState(DATA_DIR / "persona.json")
+        action = sync_action(shipped, current, state.synced())
+        if action == "edited":
+            logger.warning(
+                f"[rmts] 人格「{PERSONA_ID}」改过，不自动更新；新版见插件目录 persona/rosmontis.md"
+            )
+            return
+        if action == "create":
+            await manager.create_persona(PERSONA_ID, shipped)
+            logger.info(f"[rmts] 已创建人格「{PERSONA_ID}」，请在配置中设为默认人格")
+        elif action == "update":
+            await manager.update_persona(PERSONA_ID, system_prompt=shipped)
+            logger.info(f"[rmts] 已更新人格「{PERSONA_ID}」")
+        state.save(shipped)
 
     async def _make_memory_llm(self, umo: str) -> LLM:
         provider_id = self.config.get(
@@ -241,7 +277,7 @@ class Main(Star):
 
     @filter.llm_tool(name="get_operator_info")
     async def get_operator_info(self, event: AstrMessageEvent, name: str):
-        """获取明日方舟干员的档案信息。干员信息缺失时先调用它；传入正式名称，例如"澄闪"而不是"闪闪"；查询结果不要记进记忆。
+        """获取明日方舟干员的档案信息。干员信息缺失时先调用它；传入正式名称，例如"澄闪"而不是"闪闪"；迷迭香不擅长归纳档案，回答时只挑一两句最重要的，用自己的话说；查询结果不要记进记忆。
 
         Args:
             name(string): 干员正式名称，如：澄闪
@@ -255,7 +291,7 @@ class Main(Star):
 
     @filter.llm_tool(name="get_weather")
     async def get_weather(self, event: AstrMessageEvent, location: str):
-        """获取某地未来几天的天气预报。博士没说地点时，所在地见终端记录，找不到再问博士；地点写详细，例如"广州市"而不是"广东"；查询结果不要记进记忆。
+        """获取某地未来几天的天气预报。博士没说地点时，所在地见终端上的记事，找不到再问博士；地点写详细，例如"广州市"而不是"广东"；查询结果不要记进记忆。
 
         Args:
             location(string): 查询天气的地点，如：广州市、广宁县
@@ -273,7 +309,7 @@ class Main(Star):
 
     @filter.llm_tool(name="web_search")
     async def web_search(self, event: AstrMessageEvent, query: str):
-        """在终端浏览器上搜索。需要最新消息、实时信息，或者遇到自己不知道、不确定的事情时调用；回答时依据搜索结果，不要编造。查询结果不要记进记忆。
+        """在终端浏览器上搜索。需要最新消息、实时信息，或者遇到自己不知道、不确定的事情时调用；回答时依据搜索结果，不要编造；迷迭香不擅长写总结，只挑一两句最重要的，用自己的话说，不列清单、不贴链接。查询结果不要记进记忆。
 
         Args:
             query(string): 搜索词，不超过 128 字；可用 site:网站、"精确短语"、-排除词、after:2025 等语法
@@ -305,7 +341,7 @@ class Main(Star):
         return f"已向博士发送表情 {type}"
 
     # 可选表情要写进工具说明，所以说明在加载时按表情目录生成
-    send_sticker.__doc__ = f"""向博士发送一个迷迭香表情包。可选表情：{"、".join(sorted(STICKERS)) or "（当前没有表情，不要调用）"}
+    send_sticker.__doc__ = f"""向博士发送一个迷迭香表情包。情绪明显时偶尔发一个，不要每次回复都发；发了表情，文字里不用再把表情的意思说一遍。可选表情：{"、".join(sorted(STICKERS)) or "（当前没有表情，不要调用）"}
 
 Args:
     type(string): 表情名称，必须是上面列出的其中一个
@@ -422,7 +458,7 @@ Args:
     async def add_doctor_info(
         self, event: AstrMessageEvent, info: list, doctor_id: int
     ):
-        """博士说起自己的事就悄悄记在终端上，不用博士提醒，也不用告诉博士。例如「我下周考试」「我在广州上班」「我不吃香菜」「叫我小明就好」。闲聊、玩笑、一次性的问题不记。只能记正在说话的博士本人，别人的事用 add_global_info。
+        """博士说起自己的事就悄悄记在终端上，不用博士提醒，也不用告诉博士。例如「我下周考试」「我在广州上班」「我不吃香菜」「叫我小明就好」「我生日是3月5日」。闲聊、玩笑、一次性的问题不记。只能记正在说话的博士本人，别人的事用 add_global_info。
 
         Args:
             info(array[string]): 要记下的信息列表
@@ -442,7 +478,7 @@ Args:
 
     @filter.llm_tool(name="forget_doctor_info")
     async def forget_doctor_info(self, event: AstrMessageEvent, ids: list):
-        """博士明确要求忘掉自己的某些事时，按终端记录的编号删除。只能删除正在说话的博士本人的记录。
+        """博士明确要求忘掉自己的某些事时，按终端上记事的编号删除。只能删除正在说话的博士本人的记录。
 
         Args:
             ids(array[number]): 要忘掉的事实编号列表
@@ -456,7 +492,7 @@ Args:
 
     @filter.llm_tool(name="get_doctor_all_info")
     async def get_doctor_all_info(self, event: AstrMessageEvent, doctor_id: int):
-        """查群里另一位博士（没出现在终端记录里的）。查询别人时只能读本群得知的非私聊事实，私聊里不能查别人。查询结果不要再记进记忆。
+        """查群里另一位博士（没出现在终端上的记事里的）。查询别人时只能读本群得知的非私聊事实，私聊里不能查别人。查询结果不要再记进记忆。
 
         Args:
             doctor_id(number): 博士的 QQ 号
@@ -504,7 +540,7 @@ Args:
         start_date: str = "",
         end_date: str = "",
     ):
-        """博士说「上次」「之前」「那天」「还记得吗」，或提到想不起来的事时，先翻本作用域的日记再回答。自己补充同义词和相关人名。查询结果不要再记进记忆。
+        """博士说「上次」「之前」「那天」「还记得吗」，或提到想不起来的事时，先翻本作用域的日记再回答。自己补充同义词和相关人名。日记里没找到、对话里也没有时，就老实说想不起来，不要编。查询结果不要再记进记忆。
 
         Args:
             keywords(array[string]): 关键词，可补充同义词和相关人名
@@ -536,7 +572,7 @@ Args:
 
     @filter.llm_tool(name="poke_doctor")
     async def poke_doctor(self, event: AstrMessageEvent, doctor_id: int):
-        """戳一戳指定博士。私聊时只能戳正在聊天的博士。
+        """戳一戳指定博士。博士让她戳，或者想引起博士注意时用；同一位博士不要连着戳。私聊时只能戳正在聊天的博士。
 
         Args:
             doctor_id(number): 博士的 QQ 号
