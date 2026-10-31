@@ -171,6 +171,12 @@ class DiaryStore:
     def latest(self, scope: str, n: int) -> list[DiaryEntry]:
         return self._load(scope)[-n:] if n > 0 else []
 
+    def scopes(self) -> list[str]:
+        return sorted(p.stem for p in self.diary_dir.glob("*.json"))
+
+    def entries(self, scope: str) -> list[DiaryEntry]:
+        return self._load(scope)
+
     def get(self, scope: str, date: str) -> DiaryEntry | None:
         return next((e for e in self._load(scope) if e.date == date), None)
 

@@ -81,3 +81,9 @@ def test_diary_storage_and_search(tmp_path):
     assert DiaryStore(tmp_path).get("1", "2026-10-05").text == "DeepSeek 聊天"
     assert store.get("2", "2026-10-05") is None and store.latest("1", 0) == []
     assert len(store.search("1", ["DEEPSEEK", "deepseek", "AI"], limit=1)) == 1
+    assert store.scopes() == ["1"]
+    assert [d.date for d in store.entries("1")] == [
+        "2026-10-01",
+        "2026-10-05",
+        "2026-10-09",
+    ]

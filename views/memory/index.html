@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>迷迭香的终端</title>
+<style>
+  :root {
+    --bg: #f7f7f9; --card: #ffffff; --text: #1f2328; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #7c6cd8; --accent-soft: #efecfb;
+    --warn: #b45309; --warn-soft: #fef3c7; --danger: #b91c1c; --danger-soft: #fee2e2;
+    --ok: #15803d; --ok-soft: #dcfce7;
+  }
+  :root[data-theme="dark"] {
+    --bg: #15161a; --card: #1e2026; --text: #e6e6e9; --muted: #9ca3af;
+    --line: #2e3138; --accent: #a79bf0; --accent-soft: #2b2840;
+    --warn: #fbbf24; --warn-soft: #3a2f12; --danger: #f87171; --danger-soft: #3b1d1d;
+    --ok: #4ade80; --ok-soft: #173322;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font: 14px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0; }
+  .muted { color: var(--muted); }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .status { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; }
+  .status .grow { flex: 1; min-width: 220px; }
+  .status dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; }
+  .status dt { color: var(--muted); white-space: nowrap; }
+  .status dd { margin: 0; }
+  button {
+    font: inherit; border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    border-radius: 8px; padding: 6px 16px; cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  .tabs { display: flex; gap: 4px; margin: 4px 0 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tab {
+    background: none; color: var(--muted); border: none; border-bottom: 2px solid transparent;
+    border-radius: 0; padding: 6px 12px;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  input, select {
+    font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; min-width: 0;
+  }
+  input { flex: 1; min-width: 180px; }
+  .head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .name { font-weight: 600; }
+  .impression { margin: 6px 0 4px; font-style: italic; color: var(--muted); }
+  ul.facts { list-style: none; margin: 6px 0 0; padding: 0; }
+  ul.facts li { padding: 4px 0; border-top: 1px dashed var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  ul.facts li:first-child { border-top: none; }
+  .fid { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ftext { flex: 1; min-width: 160px; word-break: break-word; }
+  .chip {
+    display: inline-block; font-size: 12px; padding: 0 8px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent); margin-left: 4px; white-space: nowrap;
+  }
+  .chip.private { background: var(--danger-soft); color: var(--danger); }
+  .chip.self { background: var(--line); color: var(--muted); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .chip.err { background: var(--danger-soft); color: var(--danger); }
+  .diary-text { white-space: pre-wrap; margin: 8px 0 0; word-break: break-word; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: normal; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+  .error { color: var(--danger); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="card status">
+    <div class="grow">
+      <h1>迷迭香的终端</h1>
+      <dl>
+        <dt>下次整理</dt><dd id="next-run">—</dd>
+        <dt>上次整理</dt><dd id="last-run">—</dd>
+      </dl>
+    </div>
+    <div>
+      <button id="consolidate">立即整理</button>
+      <div class="muted" id="consolidate-hint" style="margin-top:4px;font-size:12px"></div>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="doctors">博士画像</button>
+    <button class="tab" data-tab="groups">群信息</button>
+    <button class="tab" data-tab="diaries">日记</button>
+    <button class="tab" data-tab="pending">待整理</button>
+  </div>
+
+  <section id="tab-doctors">
+    <div class="toolbar"><input id="doctor-filter" placeholder="按名字、QQ 号或内容筛选"></div>
+    <div id="doctors"></div>
+  </section>
+  <section id="tab-groups" hidden><div id="groups"></div></section>
+  <section id="tab-diaries" hidden>
+    <div class="toolbar">
+      <select id="diary-scope"></select>
+      <input id="diary-filter" placeholder="按关键词筛选正文、摘要和标签">
+    </div>
+    <div id="diaries"></div>
+  </section>
+  <section id="tab-pending" hidden><div class="card" id="pending"></div></section>
+  <p class="error" id="error" hidden></p>
+
+<script src="/api/plugin/page/bridge-sdk.js"></script>
+<script>
+(() => {
+  const api = window.AstrBotPluginView;
+  const $ = (id) => document.getElementById(id);
+  let overview = null;
+  let diaryEntries = [];
+  let pollTimer = null;
+
+  function el(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (key === "class") node.className = value;
+      else node.setAttribute(key, value);
+    }
+    for (const child of children.flat()) {
+      if (child == null || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+
+  function chip(text, cls = "") { return el("span", { class: `chip ${cls}` }, text); }
+
+  function sourceChips(sources) {
+    if (!sources.length) return [chip("仅本人", "self")];
+    return sources.map((s) => (s === "private" ? chip("私聊", "private") : chip(`群 ${s.replace(/^group:/, "")}`)));
+  }
+
+  function lengthChip(item) {
+    const text = `${item.length}/${overview.max_length} 字`;
+    return item.over_limit ? chip(`${text} 超限`, "warn") : chip(text, "self");
+  }
+
+  function factList(facts, withSources) {
+    if (!facts.length) return el("p", { class: "muted" }, "（还没有记录）");
+    return el("ul", { class: "facts" }, facts.map((f) =>
+      el("li", {},
+        el("span", { class: "fid" }, `#${f.id}`),
+        el("span", { class: "ftext" }, f.text),
+        el("span", { class: "muted" }, f.date || "很久以前"),
+        withSources ? sourceChips(f.sources) : null)));
+  }
+
+  function matches(text, query) { return text.toLowerCase().includes(query.toLowerCase()); }
+
+  function renderDoctors() {
+    const query = $("doctor-filter").value.trim();
+    const box = $("doctors");
+    box.replaceChildren();
+    const doctors = overview.doctors.filter((d) => !query || matches(
+      [d.name, d.qq, d.impression, ...d.facts.map((f) => f.text)].join("\n"), query));
+    if (!doctors.length) { box.append(el("div", { class: "empty" }, "没有符合的博士")); return; }
+    for (const d of doctors) {
+      box.append(el("div", { class: "card" },
+        el("div", { class: "head" },
+          el("span", {}, el("span", { class: "name" }, d.name || "（未知名字）"), " ", el("span", { class: "muted" }, d.qq)),
+          lengthChip(d)),
+        d.impression ? el("p", { class: "impression" }, `印象：${d.impression}`) : null,
+        factList(d.facts, true)));
+    }
+  }
+
+  function renderGroups() {
+    const box = $("groups");
+    box.replaceChildren();
+    if (!overview.groups.length) { box.append(el("div", { class: "empty" }, "还没有群信息")); return; }
+    for (const g of overview.groups) {
+      box.append(el("div", { class: "card" },
+        el("div", { class: "head" }, el("span", { class: "name" }, `群 ${g.id}`), lengthChip(g)),
+        factList(g.facts, false)));
+    }
+  }
+
+  function renderPending() {
+    const box = $("pending");
+    box.replaceChildren();
+    if (!overview.scopes.length) { box.append(el("div", { class: "empty" }, "还没有任何记录")); return; }
+    box.append(el("table", {},
+      el("thead", {}, el("tr", {}, ["群 / 私聊", "待整理", "其中对她说", "日记篇数", "最近一篇"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, overview.scopes.map((s) => el("tr", {},
+        el("td", {}, s.label),
+        el("td", { class: "num" }, s.pending),
+        el("td", { class: "num" }, s.pending_to_her),
+        el("td", { class: "num" }, s.diaries),
+        el("td", {}, s.latest || "—"))))));
+  }
+
+  function renderStatus() {
+    const n = overview.nightly;
+    $("next-run").textContent = n.next_run;
+    const last = $("last-run");
+    last.replaceChildren();
+    if (!n.last.at) last.append("插件加载后还没有整理过");
+    else {
+      const failed = Object.keys(n.last.failures || {});
+      last.append(`${n.last.at}（${n.last.trigger}）`,
+        n.last.error ? chip(`失败：${n.last.error}`, "err")
+          : failed.length ? chip(`${failed.length} 处失败，记录已保留：${failed.join("、")}`, "err")
+          : chip("成功", "ok"));
+    }
+    if (n.oversized.length) last.append(chip(`仍超限：${n.oversized.join("、")}`, "warn"));
+    $("consolidate").disabled = n.running;
+    $("consolidate-hint").textContent = n.running ? "正在整理，完成后自动刷新…" : "";
+    if (n.running && !pollTimer) pollTimer = setInterval(refresh, 3000);
+    if (!n.running && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function renderDiaryScopes() {
+    const select = $("diary-scope");
+    const current = select.value;
+    const scopes = overview.scopes.filter((s) => s.diaries > 0);
+    select.replaceChildren(...scopes.map((s) => el("option", { value: s.scope }, `${s.label}（${s.diaries} 篇）`)));
+    if (scopes.some((s) => s.scope === current)) select.value = current;
+    loadDiaries();
+  }
+
+  async function loadDiaries() {
+    const scope = $("diary-scope").value;
+    diaryEntries = scope ? await api.apiGet("diaries", { scope }) : [];
+    renderDiaries();
+  }
+
+  function renderDiaries() {
+    const query = $("diary-filter").value.trim();
+    const box = $("diaries");
+    box.replaceChildren();
+    const entries = diaryEntries.filter((d) => !query || matches([d.text, d.summary, ...d.tags].join("\n"), query));
+    if (!entries.length) {
+      box.append(el("div", { class: "empty" }, diaryEntries.length ? "没有符合的日记" : "还没有日记，整理过一次后就会出现"));
+      return;
+    }
+    for (const d of entries) {
+      box.append(el("div", { class: "card" },
+        el("div", { class: "head" },
+          el("span", {}, el("span", { class: "name" }, d.date), "  ", el("span", { class: "muted" }, d.summary)),
+          el("span", {}, d.tags.map((t) => chip(t)))),
+        el("p", { class: "diary-text" }, d.text)));
+    }
+  }
+
+  async function refresh() {
+    try {
+      overview = await api.apiGet("overview");
+      $("error").hidden = true;
+      renderStatus();
+      renderDoctors();
+      renderGroups();
+      renderPending();
+      renderDiaryScopes();
+    } catch (e) {
+      $("error").hidden = false;
+      $("error").textContent = `加载失败：${e.message || e}`;
+    }
+  }
+
+  document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
+    for (const name of ["doctors", "groups", "diaries", "pending"]) {
+      $(`tab-${name}`).hidden = name !== tab.dataset.tab;
+    }
+  }));
+  $("doctor-filter").addEventListener("input", renderDoctors);
+  $("diary-filter").addEventListener("input", renderDiaries);
+  $("diary-scope").addEventListener("change", loadDiaries);
+  $("consolidate").addEventListener("click", async () => {
+    if (!confirm("现在就为每个有新记录的群和私聊写日记、整理记忆吗？会调用模型，可能需要一两分钟。")) return;
+    $("consolidate").disabled = true;
+    try {
+      const result = await api.apiPost("consolidate", {});
+      $("consolidate-hint").textContent = result.message;
+    } catch (e) {
+      $("consolidate-hint").textContent = `启动失败：${e.message || e}`;
+    }
+    refresh();
+  });
+
+  api.ready().then(refresh);
+})();
+</script>
+</body>
+</html>

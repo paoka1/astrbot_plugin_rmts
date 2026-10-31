@@ -136,6 +136,12 @@ class MemoryStore:
         profile = self._groups.get(group_id)
         return deepcopy(profile.facts) if profile else []
 
+    def doctors(self) -> dict[str, Profile]:
+        return deepcopy(self._doctors)
+
+    def groups(self) -> dict[str, list[Fact]]:
+        return {gid: deepcopy(p.facts) for gid, p in self._groups.items()}
+
     def oversized(self) -> list[str]:
         """字数超过上限的画像 / 群信息，供夜间整理后告警"""
         return [

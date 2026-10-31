@@ -124,10 +124,17 @@ async def process_scope(
     if not entries:
         return
     today = diary_date_for(run_at)
-    previous = diaries.latest(scope, 1)
+    # 同一天整理第二次（手动整理过、或上次失败）时续写，不覆盖已写的部分
+    written = diaries.get(scope, today)
+    previous = [d for d in diaries.latest(scope, 2) if d.date != today][-1:]
     prompt = f"日记日期：{today}\n"
     if previous:
         prompt += f"前一篇日记（{previous[0].date}）：\n{previous[0].text}\n"
+    if written:
+        prompt += (
+            f"今天已经写过的日记（把下面的新记录续写进去，输出完整的当天日记）：\n"
+            f"{written.text}\n"
+        )
     prompt += "当天记录：\n" + _render_entries(sample_for_diary(entries, budget), scope)
     raw = parse_json_reply(await llm(persona_prompt + "\n\n" + DIARY_TASK, prompt))
     text, summary, tags = raw.get("text"), raw.get("summary"), raw.get("tags")

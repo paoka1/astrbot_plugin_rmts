@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 
 import pytest
-from rmts.diary import DailyLog, DiaryStore, LogEntry
+from rmts.diary import DailyLog, DiaryEntry, DiaryStore, LogEntry
 from rmts.memory import MemoryStore
 from rmts.nightly import (
     diary_date_for,
@@ -190,6 +190,36 @@ def test_run_nightly_isolates_failures_and_skips_memory_without_to_her(tmp_path)
         assert failures == {"bad": "模型不可用"} and calls == ["bad", "good"]
         assert logs.scopes() == ["bad"] and diaries.latest("good", 1)
         assert memory.doctor("42") is None
+
+    asyncio.run(scenario())
+
+
+def test_same_day_rerun_continues_diary(tmp_path):
+    # 白天手动整理过一次，夜里再整理同一天时续写，不覆盖已写的部分
+    async def scenario():
+        memory = MemoryStore(tmp_path)
+        logs, diaries = DailyLog(tmp_path / "logs"), DiaryStore(tmp_path / "diaries")
+        diaries.put("1", DiaryEntry("2026-10-30", "前天的日记", "前天", ["旧"]))
+        diaries.put("1", DiaryEntry("2026-10-31", "下午和博士聊天", "下午", ["博士"]))
+        logs.append("1", "umo", LogEntry(CUTOFF - 1, "42", "a", "晚上大家在聊卡池"))
+        prompts = []
+
+        async def llm(system, prompt):
+            prompts.append(prompt)
+            return DIARY
+
+        await process_scope(
+            "1",
+            memory=memory,
+            logs=logs,
+            diaries=diaries,
+            llm=llm,
+            persona_prompt="人格",
+            run_at=RUN_AT,
+            budget=20000,
+        )
+        assert "下午和博士聊天" in prompts[0] and "前天的日记" in prompts[0]
+        assert [d.date for d in diaries.entries("1")] == ["2026-10-30", "2026-10-31"]
 
     asyncio.run(scenario())
 

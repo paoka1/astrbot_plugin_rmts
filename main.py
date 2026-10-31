@@ -17,10 +17,12 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.event.filter import CustomFilter
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, StarTools
+from astrbot.api.web import json_response, request
 
 from .diary import DailyLog, DiaryStore, LogEntry, keep_text
 from .memory import MemoryStore, cap_facts, render_memory_block, visible_facts
 from .nightly import LLM, next_run, run_nightly
+from .panel import build_overview, diary_payload
 from .search import SearchError, search_text
 from .weather import WeatherError, get_forecast_text
 
@@ -97,7 +99,18 @@ class Main(Star):
         logger.info(
             f"[rmts] 生日 {len(self.birthdays)} 条，干员 {len(self.operators)} 名，表情 {len(STICKERS)} 个"
         )
+        # 定时整理和 WebUI 的「立即整理」共用一把锁，不会同时跑两次
+        self._consolidate_lock = asyncio.Lock()
+        self._manual_task: asyncio.Task | None = None
+        self.last_run = {"at": "", "trigger": "", "failures": {}, "error": ""}
         self._nightly_task = asyncio.create_task(self._nightly_loop())
+        # WebUI 页面（views/memory）的数据接口
+        for route, handler, methods, desc in (
+            ("overview", self.api_overview, ["GET"], "记忆与日记概览"),
+            ("diaries", self.api_diaries, ["GET"], "某个群或私聊的日记"),
+            ("consolidate", self.api_consolidate, ["POST"], "立即写日记并整理记忆"),
+        ):
+            context.register_web_api(f"/{PLUGIN_NAME}/{route}", handler, methods, desc)
 
     async def _make_memory_llm(self, umo: str) -> LLM:
         provider_id = self.config.get(
@@ -116,10 +129,10 @@ class Main(Star):
         persona = await self.context.persona_manager.get_default_persona_v3(umo)
         return persona["prompt"]
 
-    async def _nightly_loop(self) -> None:
-        while True:
-            now = datetime.now()
-            await asyncio.sleep((next_run(now, self.diary_time) - now).total_seconds())
+    async def _consolidate(self, trigger: str) -> None:
+        async with self._consolidate_lock:
+            run_at = datetime.now()
+            failures, error = {}, ""
             try:
                 failures = await run_nightly(
                     memory=self.memory,
@@ -127,22 +140,74 @@ class Main(Star):
                     diaries=self.diaries,
                     make_llm=self._make_memory_llm,
                     persona_for=self._persona_for,
-                    run_at=datetime.now(),
+                    run_at=run_at,
                     budget=int(self.config.get("diary_input_max_chars", 20000)),
                 )
-                for scope, error in failures.items():
-                    logger.error(f"[rmts] 夜间整理 {scope} 失败，保留当天记录: {error}")
+                for scope, reason in failures.items():
+                    logger.error(
+                        f"[rmts] 夜间整理 {scope} 失败，保留当天记录: {reason}"
+                    )
                 if oversized := self.memory.oversized():
                     logger.warning(
                         f"[rmts] 整理后仍超过字数上限，注入时会舍弃最早的事实: {'、'.join(oversized)}"
                     )
             except Exception as e:  # noqa: BLE001 — 定时循环不能因单次失败退出
+                error = str(e)
                 logger.error(f"[rmts] 夜间整理失败: {e}")
+            self.last_run = {
+                "at": run_at.strftime("%Y-%m-%d %H:%M"),
+                "trigger": trigger,
+                "failures": failures,
+                "error": error,
+            }
+
+    async def _nightly_loop(self) -> None:
+        while True:
+            now = datetime.now()
+            await asyncio.sleep((next_run(now, self.diary_time) - now).total_seconds())
+            await self._consolidate("定时")
 
     async def terminate(self) -> None:
-        self._nightly_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await self._nightly_task
+        for task in (self._nightly_task, self._manual_task):
+            if task:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+
+    # ---------- WebUI 页面接口 ----------
+
+    def _consolidating(self) -> bool:
+        # 手动任务刚创建、还没拿到锁时也算在整理
+        manual = self._manual_task is not None and not self._manual_task.done()
+        return manual or self._consolidate_lock.locked()
+
+    async def api_overview(self):
+        data = build_overview(self.memory, self.logs, self.diaries)
+        data["nightly"] = {
+            "running": self._consolidating(),
+            "next_run": next_run(datetime.now(), self.diary_time).strftime(
+                "%Y-%m-%d %H:%M"
+            ),
+            "last": self.last_run,
+            "oversized": self.memory.oversized(),
+        }
+        return json_response({"status": "ok", "data": data})
+
+    async def api_diaries(self):
+        scope = request.query.get("scope", "")
+        return json_response(
+            {"status": "ok", "data": diary_payload(self.diaries, scope)}
+        )
+
+    async def api_consolidate(self):
+        if self._consolidating():
+            return json_response(
+                {"status": "ok", "data": {"started": False, "message": "正在整理中"}}
+            )
+        self._manual_task = asyncio.create_task(self._consolidate("手动"))
+        return json_response(
+            {"status": "ok", "data": {"started": True, "message": "已开始整理"}}
+        )
 
     # ---------- 干员生日 ----------
 
