@@ -8,8 +8,14 @@
     uv run python scripts/persona_chat.py HEAD:persona/rosmontis.md persona/rosmontis.md
     uv run python scripts/persona_chat.py HEAD:persona/rosmontis.md persona/rosmontis.md -m "香香在吗" -m "今天有人欺负我"
 
+    uv run python scripts/persona_chat.py --case all
+    uv run python scripts/persona_chat.py HEAD:persona/rosmontis.md persona/rosmontis.md --case RMTS-021
+
 人格可以是文件路径，也可以是 git 的「提交:路径」。给多个人格时，每句话会分别发给每个人格。
 API Key 从环境变量 DEEPSEEK_API_KEY 读取；对话中输入 /reset 清空历史，/quit 退出。
+
+--case 跑 scripts/persona_cases.json 里的回归题：每题清空历史后依次发送 turns，
+再列出 expect（期望表现）和 red_flags（不应出现的表现），由人对照判断。
 """
 
 import argparse
@@ -23,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+CASES = Path(__file__).resolve().parent / "persona_cases.json"
 
 
 def load_persona(source: str) -> str:
@@ -61,6 +68,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("personas", nargs="*", default=["persona/rosmontis.md"])
     parser.add_argument("-m", "--message", action="append", help="依次发送这些话后退出")
+    parser.add_argument(
+        "--case", action="append", help="跑回归题，填题号（如 RMTS-021）或 all"
+    )
     parser.add_argument("--name", default="博士", help="说话的博士的名字")
     parser.add_argument("--qq", default="10000", help="说话的博士的 QQ 号")
     parser.add_argument(
@@ -93,6 +103,20 @@ def main() -> None:
             label = f"[{source}] " if len(prompts) > 1 else ""
             print(f"{label}迷迭香：{reply}\n")
 
+    if args.case:
+        cases = json.loads(CASES.read_text(encoding="utf-8"))
+        if "all" not in args.case:
+            cases = [c for c in cases if c["id"] in args.case]
+        for case in cases:
+            print(f"===== {case['id']} {case['category']}")
+            for history in histories.values():
+                history.clear()
+            for text in case["turns"]:
+                print(f"{args.name}：{text}")
+                send(text)
+            print("期望：" + "；".join(case["expect"]))
+            print("不应出现：" + "；".join(case["red_flags"]) + "\n")
+        return
     if args.message:
         for text in args.message:
             print(f"{args.name}：{text}")

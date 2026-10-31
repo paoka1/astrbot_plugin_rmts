@@ -9,5 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+# 查资料时克隆的明日方舟解包数据
+.research/
+
 # Claude Code 本地配置（服务器地址等，不提交）
 CLAUDE.local.md

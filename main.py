@@ -24,6 +24,7 @@ from .core.memory import MemoryStore, cap_facts, render_memory_block, visible_fa
 from .core.nightly import LLM, next_run, run_nightly
 from .core.panel import build_overview, diary_payload
 from .core.persona import PERSONA_ID, PersonaState, sync_action
+from .core.reminder import Reminder, ReminderError, ReminderStore, describe
 from .core.search import SearchError, search_text
 from .core.weather import WeatherError, get_forecast_text
 
@@ -56,6 +57,11 @@ POKE_MSGS = [
 EXTRA_PREFIXED = "rmts_prefixed"
 EXTRA_POKE = "rmts_poke"
 EXTRA_MEMORY = "rmts_memory"
+
+# 到点时让她按人格组织语言的任务说明
+REMIND_TASK = """现在是 {now}。博士 {name} 之前请你在这个时候提醒或告诉 TA 一件事，要说的内容：{text}
+{weather}
+请以迷迭香的口吻直接写出这时要发给博士的话，一到三句，不换行，不提“定时任务”“系统”之类的词。只输出这段话。"""
 
 
 def scope_of(event: AstrMessageEvent) -> str:
@@ -106,6 +112,8 @@ class Main(Star):
         self._manual_task: asyncio.Task | None = None
         self.last_run = {"at": "", "trigger": "", "failures": {}, "error": ""}
         self._nightly_task = asyncio.create_task(self._nightly_loop())
+        self.reminders = ReminderStore(DATA_DIR / "reminders.json")
+        self._reminder_task = asyncio.create_task(self._reminder_loop())
         # WebUI 页面（views/memory）的数据接口
         for route, handler, methods, desc in (
             ("overview", self.api_overview, ["GET"], "记忆与日记概览"),
@@ -203,8 +211,56 @@ class Main(Star):
             await asyncio.sleep((next_run(now, self.diary_time) - now).total_seconds())
             await self._consolidate("定时")
 
+    async def _reminder_loop(self) -> None:
+        while True:
+            await asyncio.sleep(20)
+            send, missed = self.reminders.pop_due(datetime.now())
+            for r in missed:
+                logger.warning(f"[rmts] 提醒 #{r.id} 错过太久（{r.at}），不再补发")
+            for r in send:
+                try:
+                    await self._fire_reminder(r)
+                except Exception as e:  # noqa: BLE001 — 单条提醒失败不能让循环退出
+                    logger.error(f"[rmts] 发送提醒 #{r.id} 失败: {e}")
+
+    async def _fire_reminder(self, r: Reminder) -> None:
+        text = r.text
+        if r.compose:
+            weather = ""
+            if r.weather and (key := self.config.get("amap_weather_api_key", "")):
+                try:
+                    weather = (
+                        f"{r.weather}的天气：{await get_forecast_text(key, r.weather)}"
+                    )
+                except (WeatherError, ValueError) as e:
+                    weather = f"（{r.weather}的天气没查到：{e}）"
+            try:
+                generate = await self._make_memory_llm(r.umo)
+                text = await generate(
+                    await self._persona_for(r.umo),
+                    REMIND_TASK.format(
+                        now=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        name=r.name,
+                        text=r.text,
+                        weather=weather,
+                    ),
+                )
+            except Exception as e:  # noqa: BLE001 — 组织语言失败时退回原话
+                logger.error(f"[rmts] 提醒 #{r.id} 组织语言失败，改发原话: {e}")
+        text = text.strip()
+        chain = MessageChain()
+        # 群里 @ 设提醒的博士，私聊直接说
+        if r.scope.startswith("private_"):
+            chain.message(text)
+        else:
+            chain.at(r.name, r.qq).message(f" {text}")
+        await self.context.send_message(r.umo, chain)
+        self.logs.append(
+            r.scope, r.umo, LogEntry(int(time.time()), "", "迷迭香", text, is_self=True)
+        )
+
     async def terminate(self) -> None:
-        for task in (self._nightly_task, self._manual_task):
+        for task in (self._nightly_task, self._manual_task, self._reminder_task):
             if task:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -588,6 +644,66 @@ Args:
             params["group_id"] = int(group_id)
         await bot.call_action("send_poke", **params)
         return f"你戳了戳ID为{doctor_id}的博士"
+
+    # ---------- 定时提醒 ----------
+
+    @filter.llm_tool(name="set_reminder")
+    async def set_reminder(
+        self,
+        event: AstrMessageEvent,
+        at: str,
+        text: str,
+        repeat: str = "",
+        weather: str = "",
+        compose: bool = False,
+    ):
+        """在终端上设一个到点提醒。博士让你到某个时间提醒 TA、定时告诉 TA 什么、每天或每周做什么时用它；设提醒和定时任务都用这个工具，不要用 future_task。时间按系统提示里的当前时间换算。到点后会在当前群或私聊发出，群里会 @ 设提醒的博士。只能给正在说话的博士设。
+
+        Args:
+            at(string): 第一次提醒的时间，格式 YYYY-MM-DD HH:MM
+            text(string): 到点要说的话，用迷迭香的口吻写好，到点原样发出；compose 为 true 时写清到点要说什么
+            repeat(string): 留空只提醒一次；daily 每天、weekdays 工作日、weekends 周末、weekly 每周、monthly 每月，或 2h 这样每 N 小时（1～24）
+            weather(string): 到点要查天气的地点，写详细如"广州市"；不需要天气就留空
+            compose(boolean): 到点时再组织语言，适合每天说法不一样的问候；一般为 false
+        """
+        try:
+            r = self.reminders.add(
+                scope=scope_of(event),
+                umo=event.unified_msg_origin,
+                qq=str(event.get_sender_id()),
+                name=event.get_sender_name(),
+                at=at,
+                repeat=repeat,
+                text=text,
+                weather=weather,
+                compose=compose,
+                now=datetime.now(),
+            )
+        except ReminderError as e:
+            return f"没有设好：{e}"
+        return f"已在终端上设好：{describe(r)}"
+
+    @filter.llm_tool(name="list_reminders")
+    async def list_reminders(self, event: AstrMessageEvent):
+        """查看正在说话的博士在这个群或私聊里设的提醒，取消前先用它查编号。"""
+        items = self.reminders.of(scope_of(event), str(event.get_sender_id()))
+        return "\n".join(describe(r) for r in items) or "这位博士在这里没有提醒"
+
+    @filter.llm_tool(name="cancel_reminder")
+    async def cancel_reminder(self, event: AstrMessageEvent, ids: list):
+        """按编号取消提醒。只能取消正在说话的博士自己在这个群或私聊里设的提醒。
+
+        Args:
+            ids(array[number]): 要取消的提醒编号列表
+        """
+        removed = self.reminders.cancel(
+            scope_of(event), str(event.get_sender_id()), ids
+        )
+        return (
+            "已取消：" + "、".join(f"#{i}" for i in removed)
+            if removed
+            else "没有找到这位博士的这些提醒"
+        )
 
     # ---------- 被戳时触发对话 ----------
 
