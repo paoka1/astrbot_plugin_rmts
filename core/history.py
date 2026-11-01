@@ -35,6 +35,15 @@ class History:
     def scopes(self) -> list[str]:
         return sorted(p.name for p in self.root.iterdir() if p.is_dir())
 
+    def latest(self, scope: str) -> LogEntry | None:
+        for path in sorted((self.root / scope).glob("*.jsonl"), reverse=True):
+            for line in reversed(path.read_text(encoding="utf-8").splitlines()):
+                try:
+                    return LogEntry(**json.loads(line))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+        return None
+
     def query(
         self, scopes: list[str], start: date | None, end: date | None, limit: int
     ) -> tuple[list[tuple[str, LogEntry]], bool]:

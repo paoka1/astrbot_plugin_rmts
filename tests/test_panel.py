@@ -80,19 +80,24 @@ def test_history_payload(tmp_path):
     history.append("private_42", LogEntry(at + 1, "", "迷迭香", "早", is_self=True))
 
     data = history_payload(history, memory, "", "", "")
-    assert [s["label"] for s in data["scopes"]] == ["群 123", "私聊 42"]
-    assert [(m["text"], m["proactive"]) for m in data["entries"]] == [
-        ("早", True),
-        ("在吗", False),
+    # 会话按最后一条消息的时间倒序；不指定作用域时不返回消息
+    assert [(s["label"], s["last_text"]) for s in data["scopes"]] == [
+        ("私聊 42", "早"),
+        ("群 123", "在吗"),
     ]
-    assert data["entries"][1]["time"] == "2026-10-31 08:00:00"
+    assert data["entries"] == []
+    data = history_payload(history, memory, "private_42", "", "")
+    assert [(m["text"], m["proactive"]) for m in data["entries"]] == [("早", True)]
+    assert data["entries"][0]["time"] == "2026-10-31 08:00:01"
     assert [
         m["text"] for m in history_payload(history, memory, "123", "", "")["entries"]
     ] == ["在吗"]
     # 不认识的作用域、坏日期都不报错
     assert history_payload(history, memory, "../x", "", "")["entries"] == []
-    assert len(history_payload(history, memory, "", "坏", "2026-10-31")["entries"]) == 2
-    assert history_payload(history, memory, "", "2026-11-01", "")["entries"] == []
+    assert (
+        len(history_payload(history, memory, "123", "坏", "2026-10-31")["entries"]) == 1
+    )
+    assert history_payload(history, memory, "123", "2026-11-01", "")["entries"] == []
 
 
 def test_reminders_payload(tmp_path):

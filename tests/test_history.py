@@ -23,6 +23,7 @@ def test_append_only_interactions_and_query(tmp_path):
     assert [e.text for _, e in rows] == ["在的"]
     rows, truncated = history.query(history.scopes(), None, None, 1)
     assert [s for s, _ in rows] == ["123"] and truncated
+    assert history.latest("123").text == "在的" and history.latest("9") is None
 
 
 def test_files_split_by_month(tmp_path):

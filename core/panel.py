@@ -79,30 +79,45 @@ def _parse_day(value: str) -> date | None:
         return None
 
 
+def _time(ts: int) -> str:
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def history_payload(
     history: History, memory: MemoryStore, scope: str, start: str, end: str
 ) -> dict:
-    known = history.scopes()
-    labels = {s: _scope_label(s, memory) for s in known}
-    # 留空查全部；其余只认已存在的作用域，避免查询参数拼出数据目录外的路径
-    scopes = known if not scope else [scope] if scope in known else []
-    rows, truncated = history.query(
-        scopes, _parse_day(start), _parse_day(end), HISTORY_LIMIT
-    )
-    return {
-        "scopes": [{"scope": s, "label": labels[s]} for s in known],
-        "entries": [
+    chats = []
+    for s in history.scopes():
+        last = history.latest(s)
+        chats.append(
             {
                 "scope": s,
-                "label": labels[s],
-                "time": datetime.fromtimestamp(e.ts).strftime("%Y-%m-%d %H:%M:%S"),
+                "label": _scope_label(s, memory),
+                "last_time": _time(last.ts) if last else "",
+                "last_text": last.text if last else "",
+            }
+        )
+    chats.sort(key=lambda c: c["last_time"], reverse=True)
+    # 只认已存在的作用域，避免查询参数拼出数据目录外的路径
+    known = [c["scope"] for c in chats]
+    rows, truncated = history.query(
+        [scope] if scope in known else [],
+        _parse_day(start),
+        _parse_day(end),
+        HISTORY_LIMIT,
+    )
+    return {
+        "scopes": chats,
+        "entries": [
+            {
+                "time": _time(e.ts),
                 "qq": e.qq,
                 "name": e.name,
                 "text": e.text,
                 "is_self": e.is_self,
                 "proactive": is_proactive(e),
             }
-            for s, e in rows
+            for _, e in rows
         ],
         "truncated": truncated,
         "limit": HISTORY_LIMIT,
