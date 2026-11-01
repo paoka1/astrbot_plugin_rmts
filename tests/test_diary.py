@@ -32,6 +32,24 @@ def test_log_merge_cutoff_and_clear(tmp_path):
     assert logs.scopes() == [] and logs.load("123", 100) == ("", [])
 
 
+def test_proactive(tmp_path):
+    logs = DailyLog(tmp_path)
+    logs.append("1", "umo", LogEntry(10, "", "迷迭香", "八点的提醒", is_self=True))
+    logs.append("1", "umo", LogEntry(11, "bot", "迷迭香", "普通回复", is_self=True))
+    logs.append("1", "umo", LogEntry(12, "42", "小明", "谢谢"))
+    assert [e.text for e in logs.proactive("1", 0)] == ["八点的提醒"]
+    # 读过一次后新追加的也能拿到，早于起点的不给
+    logs.append("1", "umo", LogEntry(20, "", "迷迭香", "新提醒", is_self=True))
+    assert [e.text for e in logs.proactive("1", 15)] == ["新提醒"]
+    assert [e.text for e in DailyLog(tmp_path).proactive("1", 0)] == [
+        "八点的提醒",
+        "新提醒",
+    ]
+    logs.clear("1", 15)
+    assert [e.text for e in logs.proactive("1", 0)] == ["新提醒"]
+    assert logs.proactive("2", 0) == []
+
+
 def test_log_cap(tmp_path):
     logs = DailyLog(tmp_path, max_entries=3)
     for ts in range(1, 6):

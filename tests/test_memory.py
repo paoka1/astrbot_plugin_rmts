@@ -186,6 +186,7 @@ def test_render_memory_block():
         "speaker_facts": [],
         "mentioned": [],
         "group_facts": [],
+        "sent": [],
         "diaries": [],
     }
     assert render_memory_block(**args) == ""
@@ -194,6 +195,7 @@ def test_render_memory_block():
         speaker_facts=[Fact(1, "住广州", "", [])],
         mentioned=[("43", Profile(name="小红"), [])],
         group_facts=[Fact(1, "是室友", TODAY, [])],
+        sent=[("2026-10-31 08:00", "早上好，今天晴")],
         diaries=[(TODAY, "今天很开心")],
     )
     block = render_memory_block(**args)
@@ -208,5 +210,6 @@ def test_render_memory_block():
             "是室友",
             TODAY,
             "今天很开心",
+            "08:00：早上好，今天晴",
         ]
     )

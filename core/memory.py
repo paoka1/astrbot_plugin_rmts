@@ -245,9 +245,12 @@ def render_memory_block(
     speaker_facts: list[Fact],
     mentioned: list[tuple[str, Profile, list[Fact]]],
     group_facts: list[Fact],
+    sent: list[tuple[str, str]],
     diaries: list[tuple[str, str]],
 ) -> str:
-    if speaker is None and not (speaker_facts or mentioned or group_facts or diaries):
+    if speaker is None and not (
+        speaker_facts or mentioned or group_facts or sent or diaries
+    ):
         return ""
 
     def lines_for(profile: Profile | None, facts: list[Fact]) -> list[str]:
@@ -268,6 +271,10 @@ def render_memory_block(
         )
     if group_facts:
         lines.extend(["本群记录：", *lines_for(None, group_facts)])
+    if sent:
+        lines.extend(
+            ["最近你在这里主动发出的消息：", *(f"{at}：{text}" for at, text in sent)]
+        )
     if diaries:
         lines.extend(["最近的日记：", *(f"{day}：{text}" for day, text in diaries)])
     return "\n".join(lines)

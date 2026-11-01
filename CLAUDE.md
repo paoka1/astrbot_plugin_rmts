@@ -49,7 +49,7 @@ uv run ruff format --check .
 - 夜间调用模型用 `self.context.llm_generate(chat_provider_id=..., system_prompt=..., prompt=...)`，不触发插件钩子；人格用 `persona_manager.get_default_persona_v3(umo)["prompt"]`
 - 人格管理器在插件加载前已初始化，插件在 `async def initialize()` 里同步人格：`get_all_personas()` 的元素有 `persona_id`、`system_prompt`；`create_persona(id, prompt)` 已存在时抛错；`update_persona(id, system_prompt=...)` 只改传入的字段
 - `on_llm_response` 在每次 agent 运行结束时触发一次
-- 插件主动发消息用 `self.context.send_message(umo, MessageChain)`；`MessageChain().at(name, qq)`、`.message(text)` 都返回自身
+- 插件主动发消息用 `self.context.send_message(umo, MessageChain)`；`MessageChain().at(name, qq)`、`.message(text)` 都返回自身。这样发的消息不进对话历史，插件记进当天记录（`qq` 为空、`is_self`），聊天时由记忆块注入最近 12 小时的
 - AstrBot 自带定时工具 `future_task`（`astrbot/core/tools/cron_tools.py`），由配置 `provider_settings.proactive_capability.add_cron_tools`（WebUI「主动型 Agent」）控制，人格的工具选择管不到它；到点时另起一次 agent 运行，不触发插件钩子。插件自己的提醒是 `set_reminder` 等工具，工具名不能和它重复
 - 内置插件 `astrbot` 已注册监听所有消息的处理器，每条消息本来就会被唤醒判定、计入限流，我们的群消息监听不改变这一点
 - WebUI 页面：`views/<名>/index.html` 自动被发现，AstrBot 会注入 bridge 脚本；页面里 `AstrBotPluginView.apiGet("overview")` 对应 `context.register_web_api("/astrbot_plugin_rmts/overview", ...)`。处理函数无参数，查询参数用 `from astrbot.api.web import request` 的 `request.query.get(...)`，返回 `json_response({"status": "ok", "data": ...})`

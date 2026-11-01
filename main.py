@@ -57,6 +57,7 @@ POKE_MSGS = [
 EXTRA_PREFIXED = "rmts_prefixed"
 EXTRA_POKE = "rmts_poke"
 EXTRA_MEMORY = "rmts_memory"
+SENT_WINDOW = 12 * 3600  # 注入最近多少秒内她主动发出的消息
 
 # 到点时让她按人格组织语言的任务说明
 REMIND_TASK = """现在是 {now}。博士 {name} 之前请你在这个时候提醒或告诉 TA 一件事，要说的内容：{text}
@@ -484,6 +485,10 @@ Args:
             group_facts=cap_facts(self.memory.group(scope), cap)
             if event.get_group_id()
             else [],
+            sent=[
+                (f"{datetime.fromtimestamp(e.ts):%Y-%m-%d %H:%M}", e.text)
+                for e in self.logs.proactive(scope, int(time.time()) - SENT_WINDOW)
+            ],
             diaries=[
                 (d.date, d.text)
                 for d in self.diaries.latest(

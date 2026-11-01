@@ -23,12 +23,22 @@ class LogEntry:
     msg_id: str = ""
 
 
+def _entry(row: dict) -> LogEntry:
+    return LogEntry(**{k: v for k, v in row.items() if k != "umo"})
+
+
+def _is_proactive(entry: LogEntry) -> bool:
+    # 插件主动发出的消息（如到点提醒）不带 QQ 号，以此和普通回复区分
+    return entry.is_self and not entry.qq
+
+
 class DailyLog:
     def __init__(self, log_dir: Path, max_entries: int = 5000) -> None:
         self.log_dir = log_dir
         log_dir.mkdir(parents=True, exist_ok=True)
         self.max_entries = max_entries
         self._counts: dict[str, int] = {}
+        self._proactive: dict[str, list[LogEntry]] = {}
 
     def _path(self, scope: str) -> Path:
         return self.log_dir / f"{scope}.jsonl"
@@ -58,6 +68,7 @@ class DailyLog:
         else:
             path.unlink(missing_ok=True)
         self._counts[scope] = len(rows)
+        self._proactive.pop(scope, None)
 
     def append(self, scope: str, umo: str, entry: LogEntry) -> None:
         if scope not in self._counts:
@@ -67,6 +78,8 @@ class DailyLog:
                 json.dumps({"umo": umo, **asdict(entry)}, ensure_ascii=False) + "\n"
             )
         self._counts[scope] += 1
+        if scope in self._proactive and _is_proactive(entry):
+            self._proactive[scope].append(entry)
         # 通常只追加一行；连续整理失败时，定期收紧文件大小，避免无限堆积。
         if self._counts[scope] > self.max_entries * 2:
             self._rewrite(scope, self._rows(scope)[-self.max_entries :])
@@ -82,7 +95,7 @@ class DailyLog:
             if row["ts"] > until_ts:
                 continue
             umo = row["umo"]
-            entry = LogEntry(**{k: v for k, v in row.items() if k != "umo"})
+            entry = _entry(row)
             if entry.msg_id and entry.msg_id in by_id:
                 by_id[entry.msg_id].to_her |= entry.to_her
             else:
@@ -91,6 +104,14 @@ class DailyLog:
                     by_id[entry.msg_id] = entry
         entries.sort(key=lambda e: e.ts)
         return umo, entries[-self.max_entries :]
+
+    def proactive(self, scope: str, since_ts: int, limit: int = 3) -> list[LogEntry]:
+        """她在这里主动发出的消息。这些不经过对话历史，要单独告诉模型。"""
+        if scope not in self._proactive:
+            self._proactive[scope] = [
+                e for e in map(_entry, self._rows(scope)) if _is_proactive(e)
+            ]
+        return [e for e in self._proactive[scope] if e.ts >= since_ts][-limit:]
 
     def clear(self, scope: str, until_ts: int) -> None:
         self._rewrite(scope, [row for row in self._rows(scope) if row["ts"] > until_ts])
