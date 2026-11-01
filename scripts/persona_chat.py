@@ -18,7 +18,7 @@ API Key 从环境变量 DEEPSEEK_API_KEY 读取；对话中输入 /reset 清空�
 再列出 expect（期望表现）和 red_flags（不应出现的表现），由人对照判断。
 turns 的每一项可以是一句话，也可以是 {"name", "qq", "text"} 换一位博士说话，
 或 {"name", "qq", "poke": true} 表示戳一戳。题目可带 memory，像插件一样拼成记事块
-加在人格后面，格式见 sim_common.memory_block；可带 now（YYYY-MM-DD HH:MM）固定当前时间。
+附在当前这条消息后面、不进对话历史，格式见 sim_common.memory_block；可带 now（YYYY-MM-DD HH:MM）固定当前时间。
 """
 
 import argparse
@@ -103,17 +103,25 @@ def main() -> None:
         now = now or datetime.now().strftime("%Y-%m-%d %H:%M")
         said = "戳了戳你" if poke else f"，对你说：{text}"
         prompt = f"博士（TA的名字是：{name}，TA的ID是{qq}）{said}\n（当前时间：{now}）"
+        # 记事块和插件一样附在当前这条消息后面，不进对话历史
+        current = (
+            f"{prompt}\n<system_reminder>{memory}</system_reminder>"
+            if memory
+            else prompt
+        )
         for source, system in prompts.items():
             history = histories[source]
-            history.append({"role": "user", "content": prompt})
-            # 记事块和插件一样拼在人格后面，不进对话历史
-            full = f"{system}\n\n{memory}" if memory else system
             reply = chat(
                 args.base,
                 key,
                 args.model,
-                [{"role": "system", "content": full}, *history],
+                [
+                    {"role": "system", "content": system},
+                    *history,
+                    {"role": "user", "content": current},
+                ],
             )
+            history.append({"role": "user", "content": prompt})
             history.append({"role": "assistant", "content": reply})
             label = f"[{source}] " if len(prompts) > 1 else ""
             print(f"{label}迷迭香：{reply}\n")

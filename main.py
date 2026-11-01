@@ -18,6 +18,7 @@ from astrbot.api.event.filter import CustomFilter
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import json_response, request
+from astrbot.core.agent.message import TextPart
 
 from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text
 from .core.history import History
@@ -625,7 +626,13 @@ Args:
             ],
         )
         if block:
-            req.system_prompt = f"{req.system_prompt or ''}\n\n{block}"
+            # 记事随发言人和被提到的人变化，放进本条用户消息而不是系统提示词，
+            # 保持系统提示词稳定、不破坏 prompt cache；标记为临时，不写进对话历史
+            req.extra_user_content_parts.append(
+                TextPart(
+                    text=f"<system_reminder>{block}</system_reminder>"
+                ).mark_as_temp()
+            )
 
     @filter.on_llm_response()
     async def record_reply(self, event: AstrMessageEvent, resp: LLMResponse | None):

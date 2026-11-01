@@ -46,13 +46,14 @@ uv run ruff format --check .
 - **来源由代码计算，不交给模型**：新增为当前作用域；更新后换成当前作用域；合并时含私聊即为私聊，否则取交集（交集为空只有本人可用）
 - 群作用域的夜间整理，模型输入里不能出现私聊事实；对私聊事实的操作一律忽略
 - 群消息监听不能 `stop_event()` 或 `yield` 结果
+- 不改动 `req.system_prompt`：每次请求都会变的内容（记事、时间等）一律放进临时的用户消息内容
 - 夜间整理任一步失败都不删当天记录；同一天再次整理时续写当天日记，不覆盖
 - 人格同步只管「迷迭香（rmts）」这一份：用户改过（内容既不是新版也不是插件上次写入的）就不覆盖；不改其他人格，不切换默认人格
 - WebUI 页面渲染用户内容只用 `textContent`，不用 `innerHTML`；接口的作用域参数要校验（见 `panel.diary_payload`）
 
 ## AstrBot 接口（已对照 4.29.3 源码核对）
 
-- 记忆块拼进 `req.system_prompt`，不会写进对话历史（保存历史时跳过首条 system 消息）
+- 记忆块不能拼进 `req.system_prompt`：它随发言人变化，会让 prompt cache 失效，插件市场审核不通过。改为 `req.extra_user_content_parts.append(TextPart(text=...).mark_as_temp())`（`TextPart` 从 `astrbot.core.agent.message` 导入），附在本条用户消息后、不写进对话历史
 - 夜间调用模型用 `self.context.llm_generate(chat_provider_id=..., system_prompt=..., prompt=...)`，不触发插件钩子；人格用 `persona_manager.get_default_persona_v3(umo)["prompt"]`
 - 人格管理器在插件加载前已初始化，插件在 `async def initialize()` 里同步人格：`get_all_personas()` 的元素有 `persona_id`、`system_prompt`；`create_persona(id, prompt)` 已存在时抛错；`update_persona(id, system_prompt=...)` 只改传入的字段
 - `on_llm_response` 在每次 agent 运行结束时触发一次

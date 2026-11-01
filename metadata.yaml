@@ -6,7 +6,7 @@ desc: |
   干员生日 / 档案查询、高德天气、DeepSeek 网页搜索、记忆与日记、定时提醒、表情包、戳一戳；
   附带依据官方资料编写的迷迭香人格，启动时自动创建和更新；
   被戳时触发对话，并在消息前拼上发送者的名字和 QQ 号。
-version: 1.2.0
+version: 1.2.1
 author: paoka1
 repo: https://github.com/paoka1/astrbot_plugin_rmts
 astrbot_version: ">=4.29"
