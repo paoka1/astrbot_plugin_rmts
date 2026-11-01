@@ -18,7 +18,7 @@ API Key 从环境变量 DEEPSEEK_API_KEY 读取；对话中输入 /reset 清空�
 再列出 expect（期望表现）和 red_flags（不应出现的表现），由人对照判断。
 turns 的每一项可以是一句话，也可以是 {"name", "qq", "text"} 换一位博士说话，
 或 {"name", "qq", "poke": true} 表示戳一戳。题目可带 memory，像插件一样拼成记事块
-加在人格后面，格式见 sim_common.memory_block。
+加在人格后面，格式见 sim_common.memory_block；可带 now（YYYY-MM-DD HH:MM）固定当前时间。
 """
 
 import argparse
@@ -98,8 +98,9 @@ def main() -> None:
         qq: str = args.qq,
         poke: bool = False,
         memory: str = "",
+        now: str = "",
     ) -> None:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = now or datetime.now().strftime("%Y-%m-%d %H:%M")
         said = "戳了戳你" if poke else f"，对你说：{text}"
         prompt = f"博士（TA的名字是：{name}，TA的ID是{qq}）{said}\n（当前时间：{now}）"
         for source, system in prompts.items():
@@ -129,7 +130,14 @@ def main() -> None:
                 qq = str(turn.get("qq", args.qq))
                 memory = memory_block(case.get("memory", {}), name, qq)
                 print(f"{name}：{'（戳了戳你）' if turn.get('poke') else turn['text']}")
-                send(turn.get("text", ""), name, qq, turn.get("poke", False), memory)
+                send(
+                    turn.get("text", ""),
+                    name,
+                    qq,
+                    turn.get("poke", False),
+                    memory,
+                    case.get("now", ""),
+                )
             print_expect(case)
         return
     if args.message:

@@ -10,6 +10,8 @@
    --data 下需要 memory.json 和 diaries/；--log 是插件的当天记录（JSONL，文件名为群号），
    从服务器拷到本地（例如 scratchpad），不要放进仓库。
    --dry 只列出唤醒时间点，不调用模型；--at 只在第几条消息处唤醒（可写多次），改了提示词后用它重跑同一批时刻。
+   --config 读插件的配置文件（服务器上 config/astrbot_plugin_rmts_config.json），用其中插话的默认值、
+   按时段的设置和每天上限；不给时用 --messages、--minutes、--threshold、--limit，不分时段。
    回放的是真实发生过的群聊：她模拟中插的话不会出现在之后的群聊里，只用于重新计数。
 
 2. 跑 scripts/interject_cases.json 里的预设场景，每个场景唤醒一次，再列出期望和不应出现的表现：
@@ -22,6 +24,7 @@ API Key 从环境变量 DEEPSEEK_API_KEY 读取。
 """
 
 import argparse
+import json
 import os
 import sys
 from datetime import datetime, time, timedelta
@@ -31,9 +34,11 @@ from persona_chat import chat, load_persona
 from rmts.core.diary import DailyLog, DiaryStore, LogEntry
 from rmts.core.interject import (
     Interjector,
+    Rule,
     build_prompt,
     interject_prompt,
     parse_reply,
+    parse_slots,
 )
 from rmts.core.memory import MemoryStore
 from sim_common import SCRIPTS, facts_of, load_cases, print_expect
@@ -43,8 +48,15 @@ CASES = SCRIPTS / "interject_cases.json"
 WAIT = timedelta(seconds=15)
 
 
-def ask(args, key: str, persona: str, prompt: str, entries: list[LogEntry]) -> bool:
-    """调一次模型，打印她的决定；开口时返回 True。"""
+def ask(
+    args,
+    key: str,
+    persona: str,
+    prompt: str,
+    entries: list[LogEntry],
+    threshold: float,
+) -> bool:
+    """调一次模型，打印她的意愿和想说的话；达到阈值、真的会发出去时返回 True。"""
     reply = chat(
         args.base,
         key,
@@ -55,7 +67,10 @@ def ask(args, key: str, persona: str, prompt: str, entries: list[LogEntry]) -> b
         ],
     )
     said = parse_reply(reply, entries)
-    if said is None:
+    sent = said.passes(threshold)
+    verdict = "发出" if sent else "不发"
+    print(f"  → 意愿 {said.score}（阈值 {threshold}），{verdict}")
+    if not said.text:
         print("  → 不说")
         return False
     if said.reply_to:
@@ -63,7 +78,7 @@ def ask(args, key: str, persona: str, prompt: str, entries: list[LogEntry]) -> b
     if said.at:
         print(f"  → @{said.at.name}")
     print(f"  → 迷迭香：{said.text}")
-    return True
+    return sent
 
 
 def run_case(case: dict, args, key: str, persona: str) -> None:
@@ -90,7 +105,7 @@ def run_case(case: dict, args, key: str, persona: str) -> None:
     print(f"===== {case['id']} {case['category']}（现在 {now:%H:%M}）")
     for e in entries:
         print(f"  {datetime.fromtimestamp(e.ts):%H:%M} {e.name}：{e.text}")
-    ask(args, key, persona, prompt, entries)
+    ask(args, key, persona, prompt, entries, args.interjector.rule(now).threshold)
     print_expect(case)
 
 
@@ -101,7 +116,7 @@ def replay(args, key: str, persona: str) -> None:
     _, entries = DailyLog(args.log.parent).load(scope, 2**62)
     if not entries:
         sys.exit("这份记录是空的")
-    interjector = Interjector(args.messages, args.minutes, args.limit)
+    interjector = args.interjector
 
     woke = spoke = 0
     for i, entry in enumerate(entries):
@@ -129,7 +144,11 @@ def replay(args, key: str, persona: str) -> None:
         if args.dry:
             continue
         prompt = build_prompt(memory, diaries, scope, entries[: i + 1], now)
-        if ask(args, key, persona, prompt, entries[: i + 1]):
+        threshold = interjector.rule(now).threshold
+        if threshold > 1:
+            print(f"  → 阈值 {threshold}，这个时段不插话")
+            continue
+        if ask(args, key, persona, prompt, entries[: i + 1], threshold):
             spoke += 1
             interjector.spoke(scope, now)
             interjector.interjected(scope, now)
@@ -161,12 +180,29 @@ def main() -> None:
         "--at", type=int, action="append", help="只在第几条消息处唤醒，可写多次"
     )
     parser.add_argument(
+        "--threshold", type=float, default=0.6, help="意愿达到多少才发出（0～1）"
+    )
+    parser.add_argument("--config", type=Path, help="插件配置文件，用其中的插话设置")
+    parser.add_argument(
         "--model", default=os.environ.get("RMTS_MODEL", "deepseek-v4-pro")
     )
     parser.add_argument(
         "--base", default=os.environ.get("RMTS_API_BASE", "https://api.deepseek.com")
     )
     args = parser.parse_args()
+    conf = (
+        json.loads(args.config.read_text(encoding="utf-8-sig")) if args.config else {}
+    )
+    default = Rule(
+        int(conf.get("interject_min_messages", args.messages)),
+        int(conf.get("interject_min_minutes", args.minutes)),
+        float(conf.get("interject_threshold", args.threshold)),
+    )
+    args.interjector = Interjector(
+        default,
+        parse_slots(conf.get("interject_slots", []), default),
+        int(conf.get("interject_daily_limit", args.limit)),
+    )
     if not (args.case or (args.data and args.log)):
         parser.error("要么给 --case，要么同时给 --data 和 --log")
 

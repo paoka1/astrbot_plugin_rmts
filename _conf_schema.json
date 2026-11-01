@@ -59,13 +59,13 @@
   },
   "interject_min_messages": {
     "type": "int",
-    "description": "插话：至少攒够多少条新群消息才唤醒她",
+    "description": "插话：默认至少攒够多少条新群消息才唤醒她",
     "hint": "她在群里说过话（回复、提醒或插话）后重新计数",
     "default": 30
   },
   "interject_min_minutes": {
     "type": "int",
-    "description": "插话：离上次唤醒、离她上次在群里说话都至少隔多少分钟",
+    "description": "插话：默认离上次唤醒、她上次在群里说话都至少隔多少分钟",
     "default": 30
   },
   "interject_daily_limit": {
@@ -73,6 +73,46 @@
     "description": "插话：每个群每天最多插话几次，0 表示不限",
     "hint": "只数她真的开口的次数，选择不说不算",
     "default": 5
+  },
+  "interject_threshold": {
+    "type": "float",
+    "description": "插话：默认意愿达到多少才开口（0～1）",
+    "hint": "每次唤醒她会给自己此刻想开口的程度打 0～1 的分，达到这个值才发出去；调高更安静，调低更活跃。日志里有每次的分数，可以对照着调",
+    "default": 0.6
+  },
+  "interject_slots": {
+    "type": "template_list",
+    "description": "插话：按时段的设置",
+    "hint": "每个时段单独设唤醒条数、间隔和意愿阈值，不在任何时段里时用上面的默认值。时段写成 HH:MM-HH:MM，可以跨午夜（如 23:00-08:00）；时段重叠时用排在前面的。阈值大于 1 表示这个时段不插话，也不调用模型",
+    "templates": {
+      "slot": {
+        "name": "时段",
+        "display_item": "time",
+        "items": {
+          "time": {
+            "type": "string",
+            "description": "时段，HH:MM-HH:MM",
+            "default": "23:00-08:00"
+          },
+          "min_messages": {
+            "type": "int",
+            "description": "至少攒够多少条新群消息",
+            "default": 30
+          },
+          "min_minutes": {
+            "type": "int",
+            "description": "至少隔多少分钟",
+            "default": 30
+          },
+          "threshold": {
+            "type": "float",
+            "description": "意愿达到多少才开口，大于 1 表示不插话",
+            "default": 0.6
+          }
+        }
+      }
+    },
+    "default": []
   },
   "interject_provider_id": {
     "type": "string",

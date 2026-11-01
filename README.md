@@ -41,7 +41,9 @@
 
 - 某个群攒够 `interject_min_messages` 条新消息、且离上次唤醒和她上次在群里说话都过了 `interject_min_minutes` 分钟，才唤醒一次
 - 唤醒时给她看最近 40 条群聊，以及和平时聊天一样的记事：本群记录、最近说话的博士在本群可见的事实、最近一篇日记；私聊得知的事不会出现
-- 大多数时候她会选择不说；开口的话记为「主动发出」，之后聊天时她知道自己说过，每个群每天最多 `interject_daily_limit` 次
+- 她先给自己此刻想开口的程度打一个 0～1 的分，再写想说的话，可以引用某条消息或 @ 某人；分数达到 `interject_threshold` 才发出。每次的分数都记在日志里，可以对照着调
+- 在插件配置的「按时段的设置」（`interject_slots`）里可以添加时段，每个时段单独设唤醒条数、间隔和阈值，例如夜里把阈值设成大于 1，这个时段就不插话，也不调用模型；不在任何时段里时用默认值
+- 开口的话记为「主动发出」，之后聊天时她知道自己说过，每个群每天最多 `interject_daily_limit` 次
 - 触发的那条消息如果正是叫她的，等她正常回复，不再插话
 
 每次唤醒都会调用一次模型。可以用 `scripts/interject_sim.py` 拿一段真实群聊回放，先看看她会在哪些时候开口、说什么。
@@ -92,8 +94,10 @@ AstrBot 自带的「主动型 Agent」也提供定时任务工具 `future_task`�
 | `diary_inject_count` | 每次对话注入的最近日记篇数，默认 1，0 表示不注入 |
 | `diary_input_max_chars` | 夜间读取当天消息的字数预算，默认 20000 |
 | `interject_enabled` | 群里插话，默认关闭 |
-| `interject_min_messages` / `interject_min_minutes` | 插话：至少多少条新消息、至少隔多少分钟才唤醒，默认 30 条、30 分钟 |
+| `interject_min_messages` / `interject_min_minutes` | 插话：默认至少多少条新消息、至少隔多少分钟才唤醒，默认 30 条、30 分钟 |
 | `interject_daily_limit` | 插话：每个群每天最多插话几次，默认 5，0 不限 |
+| `interject_threshold` | 插话：默认意愿达到多少才开口，0～1，默认 0.6 |
+| `interject_slots` | 插话：按时段的设置，每条填时段（如 `23:00-08:00`，可跨午夜）、条数、间隔和阈值，时段重叠时用排在前面的 |
 | `interject_provider_id` | 插话判断用的模型提供商 ID，留空用当前会话的聊天模型 |
 
 ## 人格

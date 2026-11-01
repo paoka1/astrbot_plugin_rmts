@@ -21,7 +21,13 @@ from astrbot.api.web import json_response, request
 
 from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text
 from .core.history import History
-from .core.interject import Interjector, build_prompt, parse_reply
+from .core.interject import (
+    Interjector,
+    Rule,
+    build_prompt,
+    parse_reply,
+    parse_slots,
+)
 from .core.memory import MemoryStore, cap_facts, render_memory_block, visible_facts
 from .core.nightly import LLM, next_run, run_nightly
 from .core.panel import (
@@ -130,9 +136,15 @@ class Main(Star):
         self._nightly_task = asyncio.create_task(self._nightly_loop())
         self.reminders = ReminderStore(DATA_DIR / "reminders.json")
         self._reminder_task = asyncio.create_task(self._reminder_loop())
-        self.interjector = Interjector(
+        default_rule = Rule(
             int(config.get("interject_min_messages", 30)),
             int(config.get("interject_min_minutes", 30)),
+            float(config.get("interject_threshold", 0.6)),
+        )
+        self.interjector = Interjector(
+            default_rule,
+            # 时段格式错误时在加载阶段报错
+            parse_slots(config.get("interject_slots", []), default_rule),
             int(config.get("interject_daily_limit", 5)),
         )
         self._interject_tasks: dict[str, asyncio.Task] = {}
@@ -478,6 +490,10 @@ Args:
 
     async def _interject(self, scope: str, umo: str) -> None:
         started = datetime.now()
+        threshold = self.interjector.rule(started).threshold
+        # 阈值大于 1 的时段不可能开口，不必调用模型
+        if threshold > 1:
+            return
         # 触发的这条可能正是叫她的；先等正常回复走完，她说过话就不插嘴
         await asyncio.sleep(15)
         if self.interjector.spoke_since(scope, started):
@@ -491,7 +507,14 @@ Args:
             said = parse_reply(
                 await generate(await self._persona_for(umo), prompt), entries
             )
-            if said is None or self.interjector.spoke_since(scope, started):
+            # 记下每次的意愿，方便对照着调阈值
+            logger.info(
+                f"[rmts] 群 {scope} 插话意愿 {said.score}（阈值 {threshold}）："
+                f"{said.text or '不说'}"
+            )
+            if not said.passes(threshold) or self.interjector.spoke_since(
+                scope, started
+            ):
                 return
             # 她可以选择引用某条消息、@ 某位博士，或直接说
             chain = MessageChain()

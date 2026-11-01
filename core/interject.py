@@ -11,19 +11,63 @@ PASS = "不说"
 CONTEXT_SIZE = 40  # 唤醒时给她看最近多少条群消息
 MAX_PEOPLE = 5  # 附上最近说话的几位博士的记事
 
-INTERJECT_TASK = f"""上面是群里最近的聊天，没有人在叫你。你可以像群里的一员那样插一句话，但大多数时候应该不说。
-只有这几种情况才开口：
-- 最近几分钟里有人提到你（迷迭香、香香、猫猫）或在找你；
-- 最近几分钟里有人说自己累了、病了、难过，需要关心；
-- 有人问了一个没人回答、而你确实知道答案的问题；
-- 正在聊的正好是你熟悉的事，比如布丁、罗德岛、你认识的人。
-开口时接住某个人的某句话，叫出对方的名字。
-要说的话前面可以加标记，告诉终端怎么发：[回复3] 引用第 3 条消息回复，[@QQ号] @ 某位博士；不加就直接发在群里。
-接较早的话、或者怕对方没注意到时，用标记说清楚是在回谁的哪句话；加不加、加哪个由你决定。
-听不懂的词、梗、黑话、游戏术语不要去问；拿不准就不说。
-带性暗示、擦边或拿你开黄腔的话，一律当作没看见，不说。
-不要重复你最近说过的话，不要假装有人在问你，不要提“系统”“唤醒”之类的词。
-要说就以迷迭香的口吻直接写出这句话，一到三句，不换行；不说就只输出：{PASS}"""
+INTERJECT_TASK = f"""上面是群里最近的聊天，没有人在叫你。你在一旁看着，大多数时候并不想插话。
+先想想你此刻有多想开口，写成 0 到 1 之间的一个数：0 是完全不想，1 是非常想。有人叫你、找你、问起你时会很高；有人需要关心、你知道一个还没人回答的问题的答案时也会高一些；听不懂的、拿不准的、带性暗示的会很低。
+第一行只写这个数。第二行写你想说的话，以迷迭香的口吻，一到三句，接住某个人的某句话；可以在话前面加标记：[回复3] 引用第 3 条消息，[@QQ号] @ 某位博士，接较早的话时用标记说清在回哪句。实在没什么想说的，第二行写：{PASS}
+这时你只能说话，用不了终端上的其他功能。"""
+
+
+@dataclass(frozen=True)
+class Rule:
+    """什么时候唤醒她、意愿达到多少才开口。"""
+
+    min_messages: int  # 至少攒够多少条新群消息
+    min_minutes: int  # 离上次唤醒、她上次说话至少隔多少分钟
+    threshold: float  # 意愿阈值，大于 1 表示不插话
+
+
+@dataclass(frozen=True)
+class Slot:
+    start: int  # 一天中的第几分钟，含
+    end: int  # 不含；比 start 小时表示跨午夜
+    rule: Rule
+
+    def contains(self, minute: int) -> bool:
+        if self.start < self.end:
+            return self.start <= minute < self.end
+        return minute >= self.start or minute < self.end
+
+
+_SPAN = re.compile(r"\s*(\d{1,2}):(\d{2})\s*[-~～—]\s*(\d{1,2}):(\d{2})\s*")
+
+
+def parse_span(span: str) -> tuple[int, int]:
+    m = _SPAN.fullmatch(span)
+    if not m or int(m[1]) > 24 or int(m[3]) > 24 or int(m[2]) > 59 or int(m[4]) > 59:
+        raise ValueError(f"插话时段应写成 HH:MM-HH:MM，收到「{span}」")
+    return int(m[1]) * 60 + int(m[2]), int(m[3]) * 60 + int(m[4])
+
+
+def parse_slots(entries: list, default: Rule) -> list[Slot]:
+    """解析 WebUI 里按时段的设置（template_list 的条目）；没填时段的条目跳过。"""
+    slots = []
+    for entry in entries or []:
+        if not isinstance(entry, dict) or not str(entry.get("time", "")).strip():
+            continue
+        start, end = parse_span(str(entry["time"]))
+        rule = Rule(
+            int(entry.get("min_messages", default.min_messages)),
+            int(entry.get("min_minutes", default.min_minutes)),
+            float(entry.get("threshold", default.threshold)),
+        )
+        slots.append(Slot(start, end, rule))
+    return slots
+
+
+def rule_at(now: datetime, default: Rule, slots: list[Slot]) -> Rule:
+    """当前时刻生效的规则；落在多个时段里时取排在前面的，不在任何时段里用默认值。"""
+    minute = now.hour * 60 + now.minute
+    return next((slot.rule for slot in slots if slot.contains(minute)), default)
 
 
 @dataclass
@@ -36,13 +80,19 @@ class _State:
 
 
 class Interjector:
-    """每个群各自计数；只在新消息够多、离上次判断和她上次说话都够久时唤醒。"""
+    """每个群各自计数；只在新消息够多、离上次判断和她上次说话都够久时唤醒。
 
-    def __init__(self, min_messages: int, min_minutes: int, daily_limit: int) -> None:
-        self.min_messages = max(1, min_messages)
-        self.interval = timedelta(minutes=max(0, min_minutes))
+    条数、间隔和阈值按当前时段的规则来。
+    """
+
+    def __init__(self, default: Rule, slots: list[Slot], daily_limit: int) -> None:
+        self.default = default
+        self.slots = slots
         self.daily_limit = daily_limit
         self._states: dict[str, _State] = {}
+
+    def rule(self, now: datetime) -> Rule:
+        return rule_at(now, self.default, self.slots)
 
     def _state(self, scope: str, now: datetime) -> _State:
         state = self._states.setdefault(scope, _State())
@@ -54,10 +104,11 @@ class Interjector:
         """记一条别人的群消息，返回这时要不要唤醒她判断。"""
         state = self._state(scope, now)
         state.new += 1
-        if state.new < self.min_messages:
+        rule = self.rule(now)
+        if state.new < max(1, rule.min_messages):
             return False
         last = max((t for t in (state.last_check, state.last_spoke) if t), default=None)
-        if last and now - last < self.interval:
+        if last and now - last < timedelta(minutes=max(0, rule.min_minutes)):
             return False
         if self.daily_limit > 0 and state.spoken >= self.daily_limit:
             return False
@@ -137,17 +188,23 @@ def build_prompt(
 
 @dataclass
 class Interjection:
-    text: str
+    text: str  # 为空表示她不想说
+    score: float | None = None  # 她自己估的开口意愿，0～1；没写时为 None
     reply_to: LogEntry | None = None  # 引用回复的那条消息
     at: LogEntry | None = None  # @ 这条消息的发送者
 
+    def passes(self, threshold: float) -> bool:
+        return bool(self.text) and self.score is not None and self.score >= threshold
 
+
+# 开头的意愿分数，允许写成「意愿：0.6」
+_SCORE = re.compile(r"\s*(?:意愿\s*[:：]?\s*)?(1(?:\.0+)?|0?\.\d+|0)(?![\d.])")
 # [回复n]、[@QQ号]；她有时会写成 [@名字]，也认
 _MARK = re.compile(r"\s*\[\s*(?:回复\s*#?\s*(\d+)|@\s*([^\]]+?))\s*\]")
 
 
-def parse_reply(reply: str, entries: list[LogEntry]) -> Interjection | None:
-    """拆出开头的 [回复n]、[@QQ号] 标记；选择不说时返回 None。
+def parse_reply(reply: str, entries: list[LogEntry]) -> Interjection:
+    """拆出开头的意愿分数和 [回复n]、[@QQ号] 标记；选择不说时 text 为空。
 
     编号对应 build_prompt 里给她看的最近 CONTEXT_SIZE 条消息。只能引用别人带消息 ID 的话，
     只能 @ 这段群聊里说过话的人，不合规的标记直接丢掉。
@@ -155,6 +212,9 @@ def parse_reply(reply: str, entries: list[LogEntry]) -> Interjection | None:
     recent = entries[-CONTEXT_SIZE:]
     result = Interjection("")
     text = reply.strip()
+    if m := _SCORE.match(text):
+        result.score = float(m[1])
+        text = text[m.end() :].strip()
     while m := _MARK.match(text):
         text = text[m.end() :]
         if m.group(1):
@@ -176,7 +236,6 @@ def parse_reply(reply: str, entries: list[LogEntry]) -> Interjection | None:
                 None,
             )
     text = text.strip()
-    if not text.strip('。.！!…"“”「」') or text.strip('。.！!…"“”「」') == PASS:
-        return None
-    result.text = text
+    if text.strip('。.！!…"“”「」') not in ("", PASS):
+        result.text = text
     return result
