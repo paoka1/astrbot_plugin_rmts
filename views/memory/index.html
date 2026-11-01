@@ -96,7 +96,6 @@
   .day { text-align: center; margin: 16px 0 4px; }
   .day span { font-size: 12px; color: var(--muted); background: var(--bg); padding: 2px 10px; border-radius: 999px; }
   .row { display: flex; flex-direction: column; align-items: flex-start; margin-top: 10px; }
-  .row.cont { margin-top: 3px; }
   .row.self { align-items: flex-end; }
   .row .meta { font-size: 12px; color: var(--muted); margin-bottom: 2px; display: flex; gap: 6px; align-items: baseline; }
   .row .who { color: var(--text); font-weight: 600; }
@@ -336,24 +335,33 @@
       box.append(el("div", { class: "note" }, `只显示最新的 ${data.limit} 条，选择日期范围可查看更早的`));
     }
     if (!data.entries.length) { box.append(el("div", { class: "empty" }, "这段时间没有交互记录")); return; }
-    let prev = null;
+    let prevDay = "";
     for (const m of [...data.entries].reverse()) {
       const day = m.time.slice(0, 10);
-      const at = Date.parse(m.time.replace(" ", "T"));
-      if (!prev || prev.day !== day) box.append(el("div", { class: "day" }, el("span", {}, day)));
-      // 同一个人几分钟内连着说的话，只在第一条上面写名字和时间
-      const cont = prev && prev.day === day && prev.who === `${m.is_self}/${m.qq}/${m.proactive}` && at - prev.at < 5 * 60000;
-      const cls = ["row", m.is_self ? "self" : "", m.proactive ? "proactive" : "", cont ? "cont" : ""].join(" ");
-      box.append(el("div", { class: cls },
-        cont ? null : el("div", { class: "meta" },
+      if (day !== prevDay) box.append(el("div", { class: "day" }, el("span", {}, day)));
+      prevDay = day;
+      box.append(el("div", { class: ["row", m.is_self ? "self" : "", m.proactive ? "proactive" : ""].join(" ") },
+        el("div", { class: "meta" },
           m.is_self ? null : el("span", { class: "who" }, m.name || "（未知）"),
           m.is_self ? null : el("span", {}, m.qq),
           el("span", {}, m.time.slice(11, 16)),
           m.proactive ? chip("主动发出", "warn") : null),
         el("div", { class: "bubble", title: m.time }, m.text)));
-      prev = { day, at, who: `${m.is_self}/${m.qq}/${m.proactive}` };
     }
+    fitChat();
     box.scrollTop = box.scrollHeight;
+  }
+
+  // 对话区占满窗口剩下的高度，只让它自己滚动，避免页面和对话区各出一个滚动条
+  function fitChat() {
+    if ($("tab-history").hidden) return;
+    const fill = (node, bottom) => {
+      const top = node.getBoundingClientRect().top + window.scrollY;
+      return `${Math.max(120, window.innerHeight - top - bottom)}px`;
+    };
+    // 底部留出卡片内边距、边框和页面内边距
+    $("history").style.height = fill($("history"), 36);
+    $("chat-list").style.maxHeight = matchMedia("(max-width: 720px)").matches ? "" : fill($("chat-list"), 20);
   }
 
   async function loadHistory() {
@@ -419,6 +427,7 @@
     if (tab.dataset.tab === "reminders") loadReminders();
   }));
   for (const id of ["history-start", "history-end"]) $(id).addEventListener("change", loadHistory);
+  window.addEventListener("resize", fitChat);
   $("history-reload").addEventListener("click", loadHistory);
   $("doctor-filter").addEventListener("input", renderDoctors);
   $("diary-filter").addEventListener("input", renderDiaries);
