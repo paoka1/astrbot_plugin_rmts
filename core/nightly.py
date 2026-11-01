@@ -10,9 +10,11 @@ from .memory import FactOps, MemoryStore, source_of, total_length, visible_facts
 
 LLM = Callable[[str, str], Awaitable[str]]
 
-DIARY_TASK = """请以迷迭香第一人称写当天的简短日记，沿用人格的口吻。
+DIARY_TASK = """请以迷迭香第一人称写当天的日记，沿用人格的口吻。
+日记不受聊天时回复长短的限制，一般写 300～600 字：当天的事多就写长一些，事少就写短一些。
+不只写和你有关的事：群里大家聊了什么、发生了什么，也写成你在一旁看到、听到的事，可以带上你的感受。
+大致按时间顺序写，提到博士时写名字；只写记录里有的事，不编造，不写其他博士的隐私。
 本任务需要 JSON，可以换行；不要按聊天格式作答。
-群里不是对你说的话只用来描绘氛围和你看到的事，不写其他博士的隐私。
 前一篇日记仅供保持连贯，不要把旧事当成今天发生的事。
 摘要为一句话；标签为 3～5 个具体的人名、事件或话题词。
 只输出 JSON：{"text": "日记正文", "summary": "一句话摘要", "tags": ["标签"]}。"""
@@ -108,6 +110,44 @@ def _render_entries(entries: list[LogEntry], scope: str) -> str:
     return "\n".join(lines)
 
 
+async def write_diary(
+    scope: str,
+    entries: list[LogEntry],
+    *,
+    diaries: DiaryStore,
+    llm: LLM,
+    persona_prompt: str,
+    today: str,
+    budget: int,
+    task: str = DIARY_TASK,
+) -> DiaryEntry:
+    """写出当天的日记，不落盘。"""
+    # 同一天整理第二次（手动整理过、或上次失败）时续写，不覆盖已写的部分
+    written = diaries.get(scope, today)
+    previous = [d for d in diaries.latest(scope, 2) if d.date != today][-1:]
+    prompt = f"日记日期：{today}\n"
+    if previous:
+        prompt += f"前一篇日记（{previous[0].date}）：\n{previous[0].text}\n"
+    if written:
+        prompt += (
+            f"今天已经写过的日记（把下面的新记录续写进去，输出完整的当天日记）：\n"
+            f"{written.text}\n"
+        )
+    prompt += "当天记录：\n" + _render_entries(sample_for_diary(entries, budget), scope)
+    raw = parse_json_reply(await llm(persona_prompt + "\n\n" + task, prompt))
+    text, summary, tags = raw.get("text"), raw.get("summary"), raw.get("tags")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("模型返回的日记正文为空")
+    if not isinstance(summary, str) or not isinstance(tags, list):
+        raise TypeError("模型返回的日记缺少摘要或标签")
+    return DiaryEntry(
+        today,
+        text.strip(),
+        summary.strip(),
+        [t for t in tags if isinstance(t, str) and t.strip()][:5],
+    )
+
+
 async def process_scope(
     scope: str,
     *,
@@ -124,31 +164,16 @@ async def process_scope(
     if not entries:
         return
     today = diary_date_for(run_at)
-    # 同一天整理第二次（手动整理过、或上次失败）时续写，不覆盖已写的部分
-    written = diaries.get(scope, today)
-    previous = [d for d in diaries.latest(scope, 2) if d.date != today][-1:]
-    prompt = f"日记日期：{today}\n"
-    if previous:
-        prompt += f"前一篇日记（{previous[0].date}）：\n{previous[0].text}\n"
-    if written:
-        prompt += (
-            f"今天已经写过的日记（把下面的新记录续写进去，输出完整的当天日记）：\n"
-            f"{written.text}\n"
-        )
-    prompt += "当天记录：\n" + _render_entries(sample_for_diary(entries, budget), scope)
-    raw = parse_json_reply(await llm(persona_prompt + "\n\n" + DIARY_TASK, prompt))
-    text, summary, tags = raw.get("text"), raw.get("summary"), raw.get("tags")
-    if not isinstance(text, str) or not text.strip():
-        raise ValueError("模型返回的日记正文为空")
-    if not isinstance(summary, str) or not isinstance(tags, list):
-        raise TypeError("模型返回的日记缺少摘要或标签")
     diaries.put(
         scope,
-        DiaryEntry(
-            today,
-            text.strip(),
-            summary.strip(),
-            [t for t in tags if isinstance(t, str) and t.strip()][:5],
+        await write_diary(
+            scope,
+            entries,
+            diaries=diaries,
+            llm=llm,
+            persona_prompt=persona_prompt,
+            today=today,
+            budget=budget,
         ),
     )
 

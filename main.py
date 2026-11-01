@@ -21,6 +21,7 @@ from astrbot.api.web import json_response, request
 
 from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text
 from .core.history import History
+from .core.interject import Interjector, build_prompt, parse_reply
 from .core.memory import MemoryStore, cap_facts, render_memory_block, visible_facts
 from .core.nightly import LLM, next_run, run_nightly
 from .core.panel import (
@@ -30,7 +31,13 @@ from .core.panel import (
     reminders_payload,
 )
 from .core.persona import PERSONA_ID, PersonaState, sync_action
-from .core.reminder import Reminder, ReminderError, ReminderStore, describe
+from .core.reminder import (
+    Reminder,
+    ReminderError,
+    ReminderStore,
+    describe,
+    remind_task,
+)
 from .core.search import SearchError, search_text
 from .core.weather import WeatherError, get_forecast_text
 
@@ -64,11 +71,6 @@ EXTRA_PREFIXED = "rmts_prefixed"
 EXTRA_POKE = "rmts_poke"
 EXTRA_MEMORY = "rmts_memory"
 SENT_WINDOW = 12 * 3600  # 注入最近多少秒内她主动发出的消息
-
-# 到点时让她按人格组织语言的任务说明
-REMIND_TASK = """现在是 {now}。博士 {name} 之前请你在这个时候提醒或告诉 TA 一件事，要说的内容：{text}
-{weather}
-请以迷迭香的口吻直接写出这时要发给博士的话，一到三句，不换行，不提“定时任务”“系统”之类的词。只输出这段话。"""
 
 
 def scope_of(event: AstrMessageEvent) -> str:
@@ -128,6 +130,12 @@ class Main(Star):
         self._nightly_task = asyncio.create_task(self._nightly_loop())
         self.reminders = ReminderStore(DATA_DIR / "reminders.json")
         self._reminder_task = asyncio.create_task(self._reminder_loop())
+        self.interjector = Interjector(
+            int(config.get("interject_min_messages", 30)),
+            int(config.get("interject_min_minutes", 30)),
+            int(config.get("interject_daily_limit", 5)),
+        )
+        self._interject_tasks: dict[str, asyncio.Task] = {}
         # WebUI 页面（views/memory）的数据接口
         for route, handler, methods, desc in (
             ("overview", self.api_overview, ["GET"], "记忆与日记概览"),
@@ -172,9 +180,11 @@ class Main(Star):
             logger.info(f"[rmts] 已更新人格「{PERSONA_ID}」")
         state.save(shipped)
 
-    async def _make_memory_llm(self, umo: str) -> LLM:
+    async def _make_memory_llm(
+        self, umo: str, config_key: str = "memory_provider_id"
+    ) -> LLM:
         provider_id = self.config.get(
-            "memory_provider_id", ""
+            config_key, ""
         ) or await self.context.get_current_chat_provider_id(umo)
 
         async def generate(system: str, prompt: str) -> str:
@@ -254,12 +264,7 @@ class Main(Star):
                 generate = await self._make_memory_llm(r.umo)
                 text = await generate(
                     await self._persona_for(r.umo),
-                    REMIND_TASK.format(
-                        now=datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        name=r.name,
-                        text=r.text,
-                        weather=weather,
-                    ),
+                    remind_task(r, datetime.now(), weather),
                 )
             except Exception as e:  # noqa: BLE001 — 组织语言失败时退回原话
                 logger.error(f"[rmts] 提醒 #{r.id} 组织语言失败，改发原话: {e}")
@@ -276,7 +281,12 @@ class Main(Star):
         )
 
     async def terminate(self) -> None:
-        for task in (self._nightly_task, self._manual_task, self._reminder_task):
+        for task in (
+            self._nightly_task,
+            self._manual_task,
+            self._reminder_task,
+            *self._interject_tasks.values(),
+        ):
             if task:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -443,11 +453,72 @@ Args:
         text = text_of(event)
         if keep_text(text, False):
             self._record_message(event, text)
+            if self.config.get("interject_enabled", False):
+                self._maybe_interject(event)
 
     def _log(self, scope: str, umo: str, entry: LogEntry) -> None:
         # 当天记录供夜间整理，整理后清掉；交互记录长期保留，供 WebUI 翻阅
         self.logs.append(scope, umo, entry)
         self.history.append(scope, entry)
+        if entry.is_self:
+            self.interjector.spoke(scope, datetime.now())
+
+    # ---------- 群里插话 ----------
+
+    def _maybe_interject(self, event: AstrMessageEvent) -> None:
+        scope = scope_of(event)
+        if not self.interjector.on_message(scope, datetime.now()):
+            return
+        task = self._interject_tasks.get(scope)
+        if task and not task.done():
+            return
+        self._interject_tasks[scope] = asyncio.create_task(
+            self._interject(scope, event.unified_msg_origin)
+        )
+
+    async def _interject(self, scope: str, umo: str) -> None:
+        started = datetime.now()
+        # 触发的这条可能正是叫她的；先等正常回复走完，她说过话就不插嘴
+        await asyncio.sleep(15)
+        if self.interjector.spoke_since(scope, started):
+            return
+        try:
+            entries = self.logs.load(scope, int(time.time()))[1]
+            prompt = build_prompt(
+                self.memory, self.diaries, scope, entries, datetime.now()
+            )
+            generate = await self._make_memory_llm(umo, "interject_provider_id")
+            said = parse_reply(
+                await generate(await self._persona_for(umo), prompt), entries
+            )
+            if said is None or self.interjector.spoke_since(scope, started):
+                return
+            # 她可以选择引用某条消息、@ 某位博士，或直接说
+            chain = MessageChain()
+            if said.reply_to:
+                chain.chain.append(Comp.Reply(id=said.reply_to.msg_id))
+            if said.at:
+                chain.at(said.at.name, said.at.qq).message(f" {said.text}")
+            else:
+                chain.message(said.text)
+            await self.context.send_message(umo, chain)
+        except Exception as e:  # noqa: BLE001 — 插话失败只记日志
+            logger.error(f"[rmts] 群 {scope} 插话失败: {e}")
+            return
+        # 记下回的是谁，之后聊天和 WebUI 里都看得出她在接哪句话
+        if said.reply_to:
+            text = (
+                f"（回复 {said.reply_to.name}：{said.reply_to.text[:20]}）{said.text}"
+            )
+        elif said.at:
+            text = f"@{said.at.name} {said.text}"
+        else:
+            text = said.text
+        self._log(
+            scope, umo, LogEntry(int(time.time()), "", "迷迭香", text, is_self=True)
+        )
+        self.interjector.interjected(scope, datetime.now())
+        logger.info(f"[rmts] 在群 {scope} 插话：{text}")
 
     def _record_message(
         self, event: AstrMessageEvent, text: str, *, to_her: bool = False
@@ -695,8 +766,9 @@ Args:
         repeat: str = "",
         weather: str = "",
         compose: bool = False,
+        follow_up: bool = False,
     ):
-        """在终端上设一个到点提醒。博士让你到某个时间提醒 TA、定时告诉 TA 什么、每天或每周做什么时用它；设提醒和定时任务都用这个工具，不要用 future_task。时间按系统提示里的当前时间换算。到点后会在当前群或私聊发出，群里会 @ 设提醒的博士。只能给正在说话的博士设。
+        """在终端上设一个到点提醒。博士让你到某个时间提醒 TA、定时告诉 TA 什么、每天或每周做什么时用它；设提醒和定时任务都用这个工具，不要用 future_task。博士说起有具体日子的要紧事（考试、面试、看病、比赛、出远门）时，你也可以自己悄悄设一条，在那件事之后合适的时候去问问 TA，follow_up 设为 true，不用告诉博士；同一件事只设一次，闲聊和玩笑不设。时间按系统提示里的当前时间换算。到点后会在当前群或私聊发出，群里会 @ 设提醒的博士。只能给正在说话的博士设。
 
         Args:
             at(string): 第一次提醒的时间，格式 YYYY-MM-DD HH:MM
@@ -704,6 +776,7 @@ Args:
             repeat(string): 留空只提醒一次；daily 每天、weekdays 工作日、weekends 周末、weekly 每周、monthly 每月，或 2h 这样每 N 小时（1～24）
             weather(string): 到点要查天气的地点，写详细如"广州市"；不需要天气就留空
             compose(boolean): 到点时再组织语言，适合每天说法不一样的问候；一般为 false
+            follow_up(boolean): 是你自己记挂、到时候去关心博士的事时为 true，text 写清要关心什么；博士要求的提醒为 false
         """
         try:
             r = self.reminders.add(
@@ -717,6 +790,7 @@ Args:
                 weather=weather,
                 compose=compose,
                 now=datetime.now(),
+                follow_up=bool(follow_up),
             )
         except ReminderError as e:
             return f"没有设好：{e}"

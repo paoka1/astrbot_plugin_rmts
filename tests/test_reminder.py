@@ -124,3 +124,22 @@ def test_pop_due_skips_long_missed(tmp_path):
     send, missed = store.pop_due(datetime(2026, 10, 31, 16, 30))
     assert send == [] and [r.id for r in missed] == [once.id, hourly.id]
     assert [(r.id, r.at) for r in store.all()] == [(hourly.id, "2026-10-31 17:00")]
+
+
+def test_follow_up_forces_compose(tmp_path):
+    store = ReminderStore(tmp_path / "reminders.json")
+    r = store.add(
+        scope="123",
+        umo="u",
+        qq="42",
+        name="小明",
+        at="2026-11-02 18:00",
+        repeat="",
+        text="问问考试考得怎么样",
+        weather="",
+        compose=False,
+        now=NOW,
+        follow_up=True,
+    )
+    assert r.compose and r.follow_up and "你自己记挂的" in describe(r)
+    assert ReminderStore(tmp_path / "reminders.json").all()[0].follow_up

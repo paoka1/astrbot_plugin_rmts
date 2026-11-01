@@ -15,6 +15,15 @@ LATE_LIMIT = timedelta(hours=1)
 REPEATS = ("daily", "weekdays", "weekends", "weekly", "monthly")
 _HOURS = re.compile(r"(\d+)h")
 
+# 到点时让她按人格组织语言的任务说明
+REMIND_TASK = """现在是 {now}。博士 {name} 之前请你在这个时候提醒或告诉 TA 一件事，要说的内容：{text}
+{weather}
+请以迷迭香的口吻直接写出这时要发给博士的话，一到三句，不换行，不提“定时任务”“系统”之类的词。只输出这段话。"""
+# 她自己记挂的事到点时的任务说明
+FOLLOW_UP_TASK = """现在是 {now}。你之前记挂着博士 {name} 的一件事：{text}
+{weather}
+现在去关心一下 TA。请以迷迭香的口吻直接写出这时要发给博士的话，一到三句，不换行，不提“提醒”“定时任务”“系统”之类的词。只输出这段话。"""
+
 
 class ReminderError(ValueError):
     """提醒参数不合法，消息会原样交给模型。"""
@@ -33,6 +42,7 @@ class Reminder:
     weather: str = ""  # 到点时要查天气的地点
     compose: bool = False  # 到点时让她按人格重新说，而不是原样发送 text
     created: str = ""
+    follow_up: bool = False  # 她自己记挂、到时候去关心博士的事，不是博士要求的提醒
 
 
 def parse_time(value: str) -> datetime:
@@ -122,6 +132,7 @@ class ReminderStore:
         weather: str,
         compose: bool,
         now: datetime,
+        follow_up: bool = False,
     ) -> Reminder:
         text = text.strip()
         if not text:
@@ -146,9 +157,10 @@ class ReminderStore:
             repeat=repeat,
             text=text,
             weather=weather.strip(),
-            # 要查天气时，必须到点再组织语言
-            compose=compose or bool(weather.strip()),
+            # 要查天气或是她自己记挂的事时，必须到点再组织语言
+            compose=compose or bool(weather.strip()) or follow_up,
             created=now.strftime(TIME_FORMAT),
+            follow_up=follow_up,
         )
         self._next_id += 1
         self._items.append(reminder)
@@ -188,6 +200,13 @@ class ReminderStore:
         return send, missed
 
 
+def remind_task(r: Reminder, now: datetime, weather: str) -> str:
+    """到点组织语言时交给模型的任务；weather 是查好的天气或没查到的说明，可为空。"""
+    return (FOLLOW_UP_TASK if r.follow_up else REMIND_TASK).format(
+        now=now.strftime(TIME_FORMAT), name=r.name, text=r.text, weather=weather
+    )
+
+
 def repeat_label(repeat: str) -> str:
     return {
         "": "只提醒一次",
@@ -202,4 +221,6 @@ def repeat_label(repeat: str) -> str:
 def describe(r: Reminder) -> str:
     """给模型看的单条提醒说明。"""
     extra = f"，到点查{r.weather}的天气" if r.weather else ""
+    if r.follow_up:
+        extra += "，你自己记挂的"
     return f"#{r.id} 下次 {r.at}（{repeat_label(r.repeat)}{extra}）：{r.text}"

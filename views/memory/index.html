@@ -396,7 +396,8 @@
           el("td", { class: "num" }, r.at),
           el("td", {}, r.repeat_label),
           el("td", { class: "text" }, r.text),
-          el("td", {}, r.weather ? `组织语言，附${r.weather}天气` : r.compose ? "组织语言" : "原样发送"),
+          el("td", {}, r.follow_up ? chip("她自己记挂的", "warn") : null,
+            r.weather ? `组织语言，附${r.weather}天气` : r.compose ? "组织语言" : "原样发送"),
           el("td", { class: "num" }, r.created || "—"))))));
     } catch (e) {
       box.replaceChildren(el("div", { class: "error" }, `加载失败：${e.message || e}`));

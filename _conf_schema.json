@@ -50,5 +50,34 @@
     "description": "夜间整理读取当天消息的字数预算",
     "hint": "优先保留和迷迭香的对话，其余群聊均匀抽样；和她的对话也超出预算时保留最近的部分",
     "default": 20000
+  },
+  "interject_enabled": {
+    "type": "bool",
+    "description": "群里插话：没人叫她时，隔一段时间让她看看最近的群聊，自己决定要不要插一句",
+    "hint": "每次唤醒都会带着人格和记事调用一次模型，热闹的群会多花一些 token；默认关闭",
+    "default": false
+  },
+  "interject_min_messages": {
+    "type": "int",
+    "description": "插话：至少攒够多少条新群消息才唤醒她",
+    "hint": "她在群里说过话（回复、提醒或插话）后重新计数",
+    "default": 30
+  },
+  "interject_min_minutes": {
+    "type": "int",
+    "description": "插话：离上次唤醒、离她上次在群里说话都至少隔多少分钟",
+    "default": 30
+  },
+  "interject_daily_limit": {
+    "type": "int",
+    "description": "插话：每个群每天最多插话几次，0 表示不限",
+    "hint": "只数她真的开口的次数，选择不说不算",
+    "default": 5
+  },
+  "interject_provider_id": {
+    "type": "string",
+    "description": "插话判断使用的模型提供商 ID",
+    "hint": "留空则使用当前会话的聊天模型提供商；可以换成便宜一些的模型",
+    "default": ""
   }
 }

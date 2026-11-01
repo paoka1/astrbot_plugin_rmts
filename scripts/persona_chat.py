@@ -16,6 +16,9 @@ API Key 从环境变量 DEEPSEEK_API_KEY 读取；对话中输入 /reset 清空�
 
 --case 跑 scripts/persona_cases.json 里的回归题：每题清空历史后依次发送 turns，
 再列出 expect（期望表现）和 red_flags（不应出现的表现），由人对照判断。
+turns 的每一项可以是一句话，也可以是 {"name", "qq", "text"} 换一位博士说话，
+或 {"name", "qq", "poke": true} 表示戳一戳。题目可带 memory，像插件一样拼成记事块
+加在人格后面，格式见 sim_common.memory_block。
 """
 
 import argparse
@@ -27,6 +30,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
+from sim_common import load_cases, memory_block, print_expect
 
 ROOT = Path(__file__).resolve().parent.parent
 CASES = Path(__file__).resolve().parent / "persona_cases.json"
@@ -87,35 +92,45 @@ def main() -> None:
     prompts = {source: load_persona(source) for source in args.personas}
     histories = {source: [] for source in prompts}
 
-    def send(text: str) -> None:
+    def send(
+        text: str,
+        name: str = args.name,
+        qq: str = args.qq,
+        poke: bool = False,
+        memory: str = "",
+    ) -> None:
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        prompt = f"博士（TA的名字是：{args.name}，TA的ID是{args.qq}），对你说：{text}\n（当前时间：{now}）"
+        said = "戳了戳你" if poke else f"，对你说：{text}"
+        prompt = f"博士（TA的名字是：{name}，TA的ID是{qq}）{said}\n（当前时间：{now}）"
         for source, system in prompts.items():
             history = histories[source]
             history.append({"role": "user", "content": prompt})
+            # 记事块和插件一样拼在人格后面，不进对话历史
+            full = f"{system}\n\n{memory}" if memory else system
             reply = chat(
                 args.base,
                 key,
                 args.model,
-                [{"role": "system", "content": system}, *history],
+                [{"role": "system", "content": full}, *history],
             )
             history.append({"role": "assistant", "content": reply})
             label = f"[{source}] " if len(prompts) > 1 else ""
             print(f"{label}迷迭香：{reply}\n")
 
     if args.case:
-        cases = json.loads(CASES.read_text(encoding="utf-8"))
-        if "all" not in args.case:
-            cases = [c for c in cases if c["id"] in args.case]
-        for case in cases:
+        for case in load_cases(CASES, args.case):
             print(f"===== {case['id']} {case['category']}")
             for history in histories.values():
                 history.clear()
-            for text in case["turns"]:
-                print(f"{args.name}：{text}")
-                send(text)
-            print("期望：" + "；".join(case["expect"]))
-            print("不应出现：" + "；".join(case["red_flags"]) + "\n")
+            for turn in case["turns"]:
+                if isinstance(turn, str):
+                    turn = {"text": turn}
+                name = turn.get("name", args.name)
+                qq = str(turn.get("qq", args.qq))
+                memory = memory_block(case.get("memory", {}), name, qq)
+                print(f"{name}：{'（戳了戳你）' if turn.get('poke') else turn['text']}")
+                send(turn.get("text", ""), name, qq, turn.get("poke", False), memory)
+            print_expect(case)
         return
     if args.message:
         for text in args.message:
