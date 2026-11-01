@@ -20,9 +20,15 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import json_response, request
 
 from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text
+from .core.history import History
 from .core.memory import MemoryStore, cap_facts, render_memory_block, visible_facts
 from .core.nightly import LLM, next_run, run_nightly
-from .core.panel import build_overview, diary_payload
+from .core.panel import (
+    build_overview,
+    diary_payload,
+    history_payload,
+    reminders_payload,
+)
 from .core.persona import PERSONA_ID, PersonaState, sync_action
 from .core.reminder import Reminder, ReminderError, ReminderStore, describe
 from .core.search import SearchError, search_text
@@ -103,6 +109,13 @@ class Main(Star):
         self.memory = MemoryStore(DATA_DIR, int(config.get("memory_max_length", 500)))
         self.logs = DailyLog(DATA_DIR / "logs")
         self.diaries = DiaryStore(DATA_DIR / "diaries")
+        seed_history = not (DATA_DIR / "history").exists()
+        self.history = History(DATA_DIR / "history")
+        if seed_history:
+            # 首次启用交互记录时，把还没整理的当天记录先导入
+            for scope in self.logs.scopes():
+                for entry in self.logs.load(scope, 2**62)[1]:
+                    self.history.append(scope, entry)
         self.diary_time = config.get("diary_time", "04:00")
         next_run(datetime.now(), self.diary_time)  # 配置格式错误时在加载阶段报错
         logger.info(
@@ -120,6 +133,8 @@ class Main(Star):
             ("overview", self.api_overview, ["GET"], "记忆与日记概览"),
             ("diaries", self.api_diaries, ["GET"], "某个群或私聊的日记"),
             ("consolidate", self.api_consolidate, ["POST"], "立即写日记并整理记忆"),
+            ("history", self.api_history, ["GET"], "她和博士们的交互记录"),
+            ("reminders", self.api_reminders, ["GET"], "所有定时提醒"),
         ):
             context.register_web_api(f"/{PLUGIN_NAME}/{route}", handler, methods, desc)
 
@@ -256,7 +271,7 @@ class Main(Star):
         else:
             chain.at(r.name, r.qq).message(f" {text}")
         await self.context.send_message(r.umo, chain)
-        self.logs.append(
+        self._log(
             r.scope, r.umo, LogEntry(int(time.time()), "", "迷迭香", text, is_self=True)
         )
 
@@ -291,6 +306,20 @@ class Main(Star):
         return json_response(
             {"status": "ok", "data": diary_payload(self.diaries, scope)}
         )
+
+    async def api_history(self):
+        data = history_payload(
+            self.history,
+            self.memory,
+            request.query.get("scope", ""),
+            request.query.get("start", ""),
+            request.query.get("end", ""),
+        )
+        return json_response({"status": "ok", "data": data})
+
+    async def api_reminders(self):
+        data = reminders_payload(self.reminders, self.memory)
+        return json_response({"status": "ok", "data": data})
 
     async def api_consolidate(self):
         if self._consolidating():
@@ -415,10 +444,15 @@ Args:
         if keep_text(text, False):
             self._record_message(event, text)
 
+    def _log(self, scope: str, umo: str, entry: LogEntry) -> None:
+        # 当天记录供夜间整理，整理后清掉；交互记录长期保留，供 WebUI 翻阅
+        self.logs.append(scope, umo, entry)
+        self.history.append(scope, entry)
+
     def _record_message(
         self, event: AstrMessageEvent, text: str, *, to_her: bool = False
     ) -> None:
-        self.logs.append(
+        self._log(
             scope_of(event),
             event.unified_msg_origin,
             LogEntry(
@@ -503,7 +537,7 @@ Args:
     async def record_reply(self, event: AstrMessageEvent, resp: LLMResponse | None):
         text = (resp.completion_text or "").strip() if resp else ""
         if text:
-            self.logs.append(
+            self._log(
                 scope_of(event),
                 event.unified_msg_origin,
                 LogEntry(

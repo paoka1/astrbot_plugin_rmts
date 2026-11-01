@@ -7,7 +7,7 @@ AstrBot 插件 `astrbot_plugin_rmts`（迷迭香工具箱）：为明日方舟�
 ## 目录
 
 - `main.py`：AstrBot 接入层。钩子、LLM 工具、WebUI 接口、夜间定时循环都在这里
-- `core/`：业务模块。`memory`（画像 / 群信息 / 可见性 / 迁移 / 注入文本）、`diary`（当日记录、抽样、日记存储与搜索）、`nightly`（写日记与整理）、`panel`（WebUI 数据汇总）、`persona`（人格同步判断）、`reminder`（定时提醒的重复规则与存储）、`search`、`weather`
+- `core/`：业务模块。`memory`（画像 / 群信息 / 可见性 / 迁移 / 注入文本）、`diary`（当日记录、抽样、日记存储与搜索）、`nightly`（写日记与整理）、`panel`（WebUI 数据汇总）、`persona`（人格同步判断）、`reminder`（定时提醒的重复规则与存储）、`history`（长期保留的交互记录，供 WebUI 查看）、`search`、`weather`
 - `views/memory/index.html`：WebUI 插件页面
 - `persona/rosmontis.md`：配套人格提示词，插件启动时同步为人格「迷迭香（rmts）」
 - `resources/`：干员生日、档案、表情包
@@ -27,9 +27,10 @@ uv run ruff format --check .
 
 ## 约定
 
-- `core/` 里的 memory、diary、nightly、panel、persona、reminder **不能 import astrbot**，以便本地测试；模块之间用相对导入。测试通过 `tests/conftest.py` 把仓库根注册为包 `rmts`，写成 `from rmts.core.memory import ...`
+- `core/` 里的 memory、diary、nightly、panel、persona、reminder、history **不能 import astrbot**，以便本地测试；模块之间用相对导入。测试通过 `tests/conftest.py` 把仓库根注册为包 `rmts`，写成 `from rmts.core.memory import ...`
 - 中文注释，日志前缀 `[rmts]`；工具的使用规则写在工具 docstring 里（`Args:` 段的类型写法如 `array[string]`、`number`）
 - JSON 写入用「写 `.tmp` 再 `replace`」原子落盘；当日记录是 JSONL 追加写
+- 记录消息一律走 `main.py` 的 `_log`：同时写当日记录（夜间整理后清掉）和交互记录（只留对她说的、她说的，长期保留）
 - 日期一律 `YYYY-MM-DD`，未知日期为 `""`（展示为「很久以前」）
 - 作用域：群聊为群号，私聊为 `private_<QQ号>`；事实来源为 `private` 或 `group:<群号>`
 

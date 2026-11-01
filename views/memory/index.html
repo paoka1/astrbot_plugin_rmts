@@ -73,6 +73,16 @@
   th { color: var(--muted); font-weight: normal; }
   td.num { font-variant-numeric: tabular-nums; }
   .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+  input[type="date"] { flex: 0 1 auto; min-width: 0; }
+  .msg { padding: 8px 0; border-top: 1px dashed var(--line); }
+  .msg:first-child { border-top: none; }
+  .msg .meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  .msg .who { font-weight: 600; color: var(--text); }
+  .msg.self .who { color: var(--accent); }
+  .msg-text { white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
+  .msg.self .msg-text { padding-left: 10px; border-left: 2px solid var(--accent); }
+  .table-wrap { overflow-x: auto; }
+  td.text { min-width: 200px; word-break: break-word; }
   .error { color: var(--danger); }
   [hidden] { display: none !important; }
 </style>
@@ -97,6 +107,8 @@
     <button class="tab" data-tab="groups">群信息</button>
     <button class="tab" data-tab="diaries">日记</button>
     <button class="tab" data-tab="pending">待整理</button>
+    <button class="tab" data-tab="history">交互记录</button>
+    <button class="tab" data-tab="reminders">定时提醒</button>
   </div>
 
   <section id="tab-doctors">
@@ -112,6 +124,17 @@
     <div id="diaries"></div>
   </section>
   <section id="tab-pending" hidden><div class="card" id="pending"></div></section>
+  <section id="tab-history" hidden>
+    <div class="toolbar">
+      <select id="history-scope"><option value="">全部群和私聊</option></select>
+      <label class="muted">从 <input type="date" id="history-start"></label>
+      <label class="muted">到 <input type="date" id="history-end"></label>
+      <button id="history-reload">刷新</button>
+    </div>
+    <p class="muted" id="history-note"></p>
+    <div class="card" id="history"></div>
+  </section>
+  <section id="tab-reminders" hidden><div class="card table-wrap" id="reminders"></div></section>
   <p class="error" id="error" hidden></p>
 
 <script src="/api/plugin/page/bridge-sdk.js"></script>
@@ -255,6 +278,59 @@
     }
   }
 
+  async function loadHistory() {
+    const select = $("history-scope");
+    const box = $("history");
+    try {
+      const data = await api.apiGet("history", {
+        scope: select.value, start: $("history-start").value, end: $("history-end").value,
+      });
+      const current = select.value;
+      select.replaceChildren(el("option", { value: "" }, "全部群和私聊"),
+        ...data.scopes.map((s) => el("option", { value: s.scope }, s.label)));
+      select.value = data.scopes.some((s) => s.scope === current) ? current : "";
+      $("history-note").textContent = data.truncated
+        ? `只显示最新的 ${data.limit} 条，缩小时间范围可查看更早的。` : `共 ${data.entries.length} 条。`;
+      box.replaceChildren();
+      if (!data.entries.length) { box.append(el("div", { class: "empty" }, "这段时间没有交互记录")); return; }
+      const all = !select.value;
+      for (const m of data.entries) {
+        box.append(el("div", { class: m.is_self ? "msg self" : "msg" },
+          el("div", { class: "meta" },
+            el("span", { class: "who" }, m.name || "（未知）"),
+            m.is_self ? null : el("span", {}, m.qq),
+            el("span", {}, m.time),
+            all ? chip(m.label, m.scope.startsWith("private_") ? "private" : "") : null,
+            m.proactive ? chip("主动发出", "warn") : null),
+          el("div", { class: "msg-text" }, m.text)));
+      }
+    } catch (e) {
+      box.replaceChildren(el("div", { class: "error" }, `加载失败：${e.message || e}`));
+    }
+  }
+
+  async function loadReminders() {
+    const box = $("reminders");
+    try {
+      const items = await api.apiGet("reminders");
+      box.replaceChildren();
+      if (!items.length) { box.append(el("div", { class: "empty" }, "现在没有定时提醒")); return; }
+      box.append(el("table", {},
+        el("thead", {}, el("tr", {}, ["#", "群 / 私聊", "博士", "下次", "重复", "内容", "到点", "设于"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, items.map((r) => el("tr", {},
+          el("td", { class: "num" }, r.id),
+          el("td", {}, r.label),
+          el("td", {}, `${r.name}(${r.qq})`),
+          el("td", { class: "num" }, r.at),
+          el("td", {}, r.repeat_label),
+          el("td", { class: "text" }, r.text),
+          el("td", {}, r.weather ? `组织语言，附${r.weather}天气` : r.compose ? "组织语言" : "原样发送"),
+          el("td", { class: "num" }, r.created || "—"))))));
+    } catch (e) {
+      box.replaceChildren(el("div", { class: "error" }, `加载失败：${e.message || e}`));
+    }
+  }
+
   async function refresh() {
     try {
       overview = await api.apiGet("overview");
@@ -272,10 +348,14 @@
 
   document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
-    for (const name of ["doctors", "groups", "diaries", "pending"]) {
+    for (const name of ["doctors", "groups", "diaries", "pending", "history", "reminders"]) {
       $(`tab-${name}`).hidden = name !== tab.dataset.tab;
     }
+    if (tab.dataset.tab === "history") loadHistory();
+    if (tab.dataset.tab === "reminders") loadReminders();
   }));
+  for (const id of ["history-scope", "history-start", "history-end"]) $(id).addEventListener("change", loadHistory);
+  $("history-reload").addEventListener("click", loadHistory);
   $("doctor-filter").addEventListener("input", renderDoctors);
   $("diary-filter").addEventListener("input", renderDiaries);
   $("diary-scope").addEventListener("change", loadDiaries);

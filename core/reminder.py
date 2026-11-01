@@ -188,15 +188,18 @@ class ReminderStore:
         return send, missed
 
 
-def describe(r: Reminder) -> str:
-    """给模型看的单条提醒说明。"""
-    repeat = {
+def repeat_label(repeat: str) -> str:
+    return {
         "": "只提醒一次",
         "daily": "每天",
         "weekdays": "工作日",
         "weekends": "周末",
         "weekly": "每周",
         "monthly": "每月",
-    }.get(r.repeat, f"每 {r.repeat[:-1]} 小时")
+    }.get(repeat, f"每 {repeat[:-1]} 小时")
+
+
+def describe(r: Reminder) -> str:
+    """给模型看的单条提醒说明。"""
     extra = f"，到点查{r.weather}的天气" if r.weather else ""
-    return f"#{r.id} 下次 {r.at}（{repeat}{extra}）：{r.text}"
+    return f"#{r.id} 下次 {r.at}（{repeat_label(r.repeat)}{extra}）：{r.text}"

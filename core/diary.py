@@ -27,7 +27,7 @@ def _entry(row: dict) -> LogEntry:
     return LogEntry(**{k: v for k, v in row.items() if k != "umo"})
 
 
-def _is_proactive(entry: LogEntry) -> bool:
+def is_proactive(entry: LogEntry) -> bool:
     # 插件主动发出的消息（如到点提醒）不带 QQ 号，以此和普通回复区分
     return entry.is_self and not entry.qq
 
@@ -78,7 +78,7 @@ class DailyLog:
                 json.dumps({"umo": umo, **asdict(entry)}, ensure_ascii=False) + "\n"
             )
         self._counts[scope] += 1
-        if scope in self._proactive and _is_proactive(entry):
+        if scope in self._proactive and is_proactive(entry):
             self._proactive[scope].append(entry)
         # 通常只追加一行；连续整理失败时，定期收紧文件大小，避免无限堆积。
         if self._counts[scope] > self.max_entries * 2:
@@ -109,7 +109,7 @@ class DailyLog:
         """她在这里主动发出的消息。这些不经过对话历史，要单独告诉模型。"""
         if scope not in self._proactive:
             self._proactive[scope] = [
-                e for e in map(_entry, self._rows(scope)) if _is_proactive(e)
+                e for e in map(_entry, self._rows(scope)) if is_proactive(e)
             ]
         return [e for e in self._proactive[scope] if e.ts >= since_ts][-limit:]
 
