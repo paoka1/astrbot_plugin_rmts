@@ -39,7 +39,7 @@
 
 ## 群里插话
 
-开启 `interject_enabled` 后，没人叫她时，她也会隔一段时间看看群里在聊什么，自己决定要不要插一句：
+没人叫她时，她也会隔一段时间看看群里在聊什么，自己决定要不要插一句（`interject_enabled`，默认开启）：
 
 - 某个群攒够 `interject_min_messages` 条新消息、且离上次唤醒和她上次在群里说话都过了 `interject_min_minutes` 分钟，才唤醒一次
 - 唤醒时给她看最近 40 条群聊，以及和平时聊天一样的记事：本群记录、最近说话的博士在本群可见的事实、最近一篇日记；私聊得知的事不会出现
@@ -96,7 +96,7 @@ AstrBot 自带的「主动型 Agent」也提供定时任务工具 `future_task`�
 | `diary_inject_count` | 每次对话注入的最近日记篇数，默认 1，0 表示不注入 |
 | `group_chat_count` | 群里被叫到时附上的最近群聊条数（3 小时内），默认 30，0 表示不附 |
 | `diary_input_max_chars` | 夜间读取当天消息的字数预算，默认 20000 |
-| `interject_enabled` | 群里插话，默认关闭 |
+| `interject_enabled` | 群里插话，默认开启；每次唤醒都会调用一次模型，不需要时关掉 |
 | `interject_min_messages` / `interject_min_minutes` | 插话：默认至少多少条新消息、至少隔多少分钟才唤醒，默认 30 条、30 分钟 |
 | `interject_daily_limit` | 插话：每个群每天最多插话几次，默认 5，0 不限 |
 | `interject_threshold` | 插话：默认意愿达到多少才开口，0～1，默认 0.6 |

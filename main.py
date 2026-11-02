@@ -468,7 +468,7 @@ Args:
         text = text_of(event)
         if keep_text(text, False):
             self._record_message(event, text)
-            if self.config.get("interject_enabled", False):
+            if self.config.get("interject_enabled", True):
                 self._maybe_interject(event)
 
     def _log(self, scope: str, umo: str, entry: LogEntry) -> None:
