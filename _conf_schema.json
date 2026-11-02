@@ -45,6 +45,12 @@
     "description": "每次对话注入最近几篇日记，0 表示不注入",
     "default": 1
   },
+  "group_chat_count": {
+    "type": "int",
+    "description": "群里被叫到时，附上最近几条群聊，0 表示不附",
+    "hint": "只取 3 小时内记下的文字消息，只在这次请求里给她看、不写进对话历史。不要同时开启 AstrBot 自带的群聊上下文感知，否则同样的群聊会给两遍",
+    "default": 30
+  },
   "diary_input_max_chars": {
     "type": "int",
     "description": "夜间整理读取当天消息的字数预算",

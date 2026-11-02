@@ -1,9 +1,12 @@
+from datetime import datetime
+
 from rmts.core.diary import (
     DailyLog,
     DiaryEntry,
     DiaryStore,
     LogEntry,
     keep_text,
+    recent_chat,
     sample_for_diary,
 )
 
@@ -58,6 +61,30 @@ def test_log_cap(tmp_path):
     for ts in range(6, 30):
         logs.append("1", "umo", LogEntry(ts, "42", "a", "内容"))
     assert len((tmp_path / "1.jsonl").read_text(encoding="utf-8").splitlines()) <= 6
+
+
+def test_recent_chat():
+    t = int(datetime(2026, 11, 2, 14, 20).timestamp())
+    entries = [
+        LogEntry(t - 7200, "10001", "小明", "太早了"),
+        LogEntry(t, "10001", "小明", "有人打危机合约吗"),
+        LogEntry(t + 60, "bot", "迷迭香", "合约……是什么", is_self=True),
+        LogEntry(t + 120, "", "迷迭香", "八点的提醒", is_self=True),
+        LogEntry(t + 180, "20002", "阿蓝", "第三天好难"),
+        LogEntry(t + 360, "30003", "小红", "你会打吗", to_her=True, msg_id="m9"),
+    ]
+    assert recent_chat(entries, since_ts=t, skip_msg_id="m9", limit=30) == [
+        "14:20 小明(10001)：有人打危机合约吗",
+        "14:21 你：合约……是什么",
+        "14:22 你：八点的提醒",
+        "14:23 阿蓝(20002)：第三天好难",
+    ]
+    assert recent_chat(entries, since_ts=t, skip_msg_id="m9", limit=1) == [
+        "14:23 阿蓝(20002)：第三天好难"
+    ]
+    # 没有消息 ID 时不跳过任何一条
+    assert len(recent_chat(entries, since_ts=0, skip_msg_id="", limit=30)) == 6
+    assert recent_chat(entries, since_ts=0, skip_msg_id="m9", limit=0) == []
 
 
 def test_keep_text_and_sample():

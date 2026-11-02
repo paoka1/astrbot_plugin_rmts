@@ -188,8 +188,12 @@ def test_render_memory_block():
         "group_facts": [],
         "sent": [],
         "diaries": [],
+        "chat": [],
     }
     assert render_memory_block(**args) == ""
+    # 没有记事时只给群聊，不出现「还没有记录」
+    chat_only = render_memory_block(**{**args, "chat": ["14:20 小明(42)：在吗"]})
+    assert chat_only == "【群里最近的聊天】（你被叫到之前）\n14:20 小明(42)：在吗"
     args.update(
         speaker=Profile(impression="很温柔"),
         speaker_facts=[Fact(1, "住广州", "", [])],
@@ -197,8 +201,12 @@ def test_render_memory_block():
         group_facts=[Fact(1, "是室友", TODAY, [])],
         sent=[("2026-10-31 08:00", "早上好，今天晴")],
         diaries=[(TODAY, "今天很开心")],
+        chat=["14:20 小红(43)：今天好累"],
     )
     block = render_memory_block(**args)
+    assert block.endswith(
+        "【群里最近的聊天】（你被叫到之前）\n14:20 小红(43)：今天好累"
+    )
     assert all(
         text in block
         for text in [

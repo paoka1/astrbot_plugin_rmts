@@ -20,7 +20,7 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import json_response, request
 from astrbot.core.agent.message import TextPart
 
-from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text
+from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text, recent_chat
 from .core.history import History
 from .core.interject import (
     Interjector,
@@ -79,6 +79,7 @@ EXTRA_POKE = "rmts_poke"
 EXTRA_MEMORY = "rmts_memory"
 EXTRA_MENTIONED = "rmts_mentioned"
 SENT_WINDOW = 12 * 3600  # 注入最近多少秒内她主动发出的消息
+CHAT_WINDOW = 3 * 3600  # 群里被叫到时，附上最近多少秒内的群聊
 
 
 def scope_of(event: AstrMessageEvent) -> str:
@@ -568,6 +569,17 @@ Args:
         event.set_extra(EXTRA_MEMORY, True)
         scope = scope_of(event)
         speaker_qq = str(event.get_sender_id())
+        # 先取群聊再记下这条，戳一戳这种不带消息 ID 的也不会算进去
+        chat = []
+        count = int(self.config.get("group_chat_count", 30))
+        if event.get_group_id() and count > 0:
+            now = int(time.time())
+            chat = recent_chat(
+                self.logs.load(scope, now)[1],
+                since_ts=now - CHAT_WINDOW,
+                skip_msg_id=str(event.message_obj.message_id or ""),
+                limit=count,
+            )
         text = "（戳了戳你）" if event.get_extra(EXTRA_POKE) else text_of(event)
         if keep_text(text, True):
             self._record_message(event, text, to_her=True)
@@ -625,6 +637,7 @@ Args:
                     scope, int(self.config.get("diary_inject_count", 1))
                 )
             ],
+            chat=chat,
         )
         if block:
             # 记事随发言人和被提到的人变化，放进本条用户消息而不是系统提示词，

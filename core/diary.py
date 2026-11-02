@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 
 MIN_TEXT_LEN = 2
@@ -115,6 +116,24 @@ class DailyLog:
 
     def clear(self, scope: str, until_ts: int) -> None:
         self._rewrite(scope, [row for row in self._rows(scope) if row["ts"] > until_ts])
+
+
+def recent_chat(
+    entries: list[LogEntry], *, since_ts: int, skip_msg_id: str, limit: int
+) -> list[str]:
+    """群里最近的聊天，她被叫到时附给她看。跳过叫她的这条，她自己说的标成「你」。"""
+    if limit <= 0:
+        return []
+    picked = [
+        e
+        for e in entries
+        if e.ts >= since_ts and not (skip_msg_id and e.msg_id == skip_msg_id)
+    ][-limit:]
+    lines = []
+    for e in picked:
+        who = "你" if e.is_self else f"{e.name}({e.qq})"
+        lines.append(f"{datetime.fromtimestamp(e.ts):%H:%M} {who}：{e.text}")
+    return lines
 
 
 def sample_for_diary(entries: list[LogEntry], budget: int) -> list[LogEntry]:

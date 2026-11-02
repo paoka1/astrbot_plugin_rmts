@@ -24,7 +24,8 @@ def memory_block(memory: dict, name: str, qq: str) -> str:
     """把场景里的 memory 拼成插件注入的记事块，当作正在说话的博士的记事。
 
     memory 可有：impression、facts（字符串列表）、group（本群记录）、
-    diary（[日期, 正文]）、sent（[[时间, 她主动发过的话], ...]）。
+    diary（[日期, 正文]）、sent（[[时间, 她主动发过的话], ...]）、
+    chat（群里最近的聊天，每行如「14:20 小明(10001)：……」）。
     """
     if not memory:
         return ""
@@ -37,6 +38,7 @@ def memory_block(memory: dict, name: str, qq: str) -> str:
         group_facts=facts_of(memory.get("group", [])),
         sent=[tuple(item) for item in memory.get("sent", [])],
         diaries=[tuple(memory["diary"])] if memory.get("diary") else [],
+        chat=memory.get("chat", []),
     )
 
 

@@ -247,11 +247,14 @@ def render_memory_block(
     group_facts: list[Fact],
     sent: list[tuple[str, str]],
     diaries: list[tuple[str, str]],
+    chat: list[str],
 ) -> str:
+    # 群聊不是终端上的记事，单独成段；没有记事时也照样附上
+    chat_lines = ["【群里最近的聊天】（你被叫到之前）", *chat] if chat else []
     if speaker is None and not (
         speaker_facts or mentioned or group_facts or sent or diaries
     ):
-        return ""
+        return "\n".join(chat_lines)
 
     def lines_for(profile: Profile | None, facts: list[Fact]) -> list[str]:
         lines = (
@@ -277,4 +280,5 @@ def render_memory_block(
         )
     if diaries:
         lines.extend(["最近的日记：", *(f"{day}：{text}" for day, text in diaries)])
+    lines.extend(chat_lines)
     return "\n".join(lines)
