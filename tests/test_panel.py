@@ -3,9 +3,11 @@ from datetime import datetime
 
 from rmts.core.diary import DailyLog, DiaryEntry, DiaryStore, LogEntry
 from rmts.core.history import History
+from rmts.core.interject import Decision, DecisionLog
 from rmts.core.memory import MemoryStore
 from rmts.core.panel import (
     build_overview,
+    decisions_payload,
     diary_payload,
     history_payload,
     reminders_payload,
@@ -98,6 +100,27 @@ def test_history_payload(tmp_path):
         len(history_payload(history, memory, "123", "坏", "2026-10-31")["entries"]) == 1
     )
     assert history_payload(history, memory, "123", "2026-11-01", "")["entries"] == []
+
+
+def test_decisions_payload(tmp_path):
+    memory = MemoryStore(tmp_path, max_length=100)
+    log = DecisionLog(tmp_path / "interjections")
+    at = int(datetime(2026, 10, 31, 8).timestamp())
+    log.append("123", Decision(at, 0.5, "不想说", score=0.1, reason="没听懂"))
+    log.append("123", Decision(at + 60, 0.5, "发出", score=0.7, text="早"))
+
+    data = decisions_payload(log, memory, "", "", "")
+    assert data["scopes"] == [{"scope": "123", "label": "群 123"}]
+    assert data["decisions"] == []
+    rows = decisions_payload(log, memory, "123", "", "")["decisions"]
+    # 新的在前，带格式化好的时间
+    assert [(d["outcome"], d["time"]) for d in rows] == [
+        ("发出", "2026-10-31 08:01:00"),
+        ("不想说", "2026-10-31 08:00:00"),
+    ]
+    assert rows[1]["reason"] == "没听懂"
+    assert decisions_payload(log, memory, "../x", "", "")["decisions"] == []
+    assert decisions_payload(log, memory, "123", "2026-11-01", "")["decisions"] == []
 
 
 def test_reminders_payload(tmp_path):

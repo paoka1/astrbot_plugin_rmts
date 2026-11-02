@@ -113,6 +113,15 @@
   .table-wrap { overflow-x: auto; }
   td.text { min-width: 200px; word-break: break-word; }
   .error { color: var(--danger); }
+  .said { margin: 8px 0 0; word-break: break-word; }
+  .said .label { color: var(--muted); }
+  details.ctx { margin-top: 8px; }
+  details.ctx summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  ol.ctx-lines { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13px; }
+  ol.ctx-lines li { padding: 2px 6px; border-radius: 6px; word-break: break-word; }
+  ol.ctx-lines li.self { color: var(--accent); }
+  ol.ctx-lines li.hit { background: var(--accent-soft); }
+  ol.ctx-lines .n { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -138,6 +147,7 @@
     <button class="tab" data-tab="pending">待整理</button>
     <button class="tab" data-tab="history">交互记录</button>
     <button class="tab" data-tab="reminders">定时提醒</button>
+    <button class="tab" data-tab="decisions">插话判断</button>
   </div>
 
   <section id="tab-doctors">
@@ -169,6 +179,19 @@
     </div>
   </section>
   <section id="tab-reminders" hidden><div class="card table-wrap" id="reminders"></div></section>
+  <section id="tab-decisions" hidden>
+    <div class="toolbar">
+      <select id="decision-scope"></select>
+      <select id="decision-outcome">
+        <option value="">全部判断</option>
+        <option value="发出">只看发出的</option>
+        <option value="未发出">只看没发出的</option>
+      </select>
+      <span class="muted">从 <input type="date" id="decision-start"> 到 <input type="date" id="decision-end"></span>
+      <button id="decision-reload">刷新</button>
+    </div>
+    <div id="decisions"></div>
+  </section>
   <p class="error" id="error" hidden></p>
 
 <script src="/api/plugin/page/bridge-sdk.js"></script>
@@ -404,6 +427,64 @@
     }
   }
 
+  let decisionData = null;
+
+  const OUTCOME_CHIP = { "发出": "ok", "没达到阈值": "warn", "不想说": "self", "她已经说过话": "self" };
+
+  function renderDecisions() {
+    const box = $("decisions");
+    box.replaceChildren();
+    const data = decisionData;
+    if (!data) return;
+    if (!data.scopes.length) { box.append(el("div", { class: "empty" }, "还没有插话判断，开启群里插话后会出现")); return; }
+    if (data.truncated) {
+      box.append(el("div", { class: "muted", style: "margin-bottom:8px" }, `只显示最新的 ${data.limit} 次，选择日期范围可查看更早的`));
+    }
+    const want = $("decision-outcome").value;
+    const rows = data.decisions.filter((d) => !want || (want === "发出") === (d.outcome === "发出"));
+    if (!rows.length) { box.append(el("div", { class: "empty" }, "这段时间没有符合的判断")); return; }
+    for (const d of rows) {
+      const score = d.score == null ? "没写分数" : `意愿 ${d.score}`;
+      const target = d.context.find((c) => c.n === d.reply_to);
+      box.append(el("div", { class: "card" },
+        el("div", { class: "head" },
+          el("span", {}, el("span", { class: "name" }, d.time), "  ", el("span", { class: "muted" }, `${score} / 阈值 ${d.threshold}`)),
+          chip(d.outcome, OUTCOME_CHIP[d.outcome] || "err")),
+        el("p", { class: "said" }, el("span", { class: "label" }, "她想说："),
+          target ? chip(`回复 #${target.n} ${target.name}`) : null,
+          d.at ? chip(`@${d.at}`) : null,
+          d.text ? ` ${d.text}` : el("span", { class: "muted" }, "（不说）")),
+        d.reason ? el("p", { class: "said" }, el("span", { class: "label" }, "理由："), d.reason) : null,
+        el("details", { class: "ctx" },
+          el("summary", {}, `当时看到的群聊（${d.context.length} 条）`),
+          el("ol", { class: "ctx-lines" }, d.context.map((c) =>
+            el("li", { class: [c.is_self ? "self" : "", c.n === d.reply_to ? "hit" : ""].join(" ") },
+              el("span", { class: "n" }, `[${c.n}] ${c.time}`),
+              c.is_self ? "你" : `${c.name}(${c.qq})`, "：", c.text))))));
+    }
+  }
+
+  async function loadDecisions() {
+    try {
+      const select = $("decision-scope");
+      const query = { start: $("decision-start").value, end: $("decision-end").value };
+      let data = await api.apiGet("interjections", { ...query, scope: select.value });
+      if (!data.scopes.some((s) => s.scope === select.value) && data.scopes.length) {
+        data = await api.apiGet("interjections", { ...query, scope: data.scopes[0].scope });
+        select.replaceChildren(...data.scopes.map((s) => el("option", { value: s.scope }, s.label)));
+        select.value = data.scopes[0].scope;
+      } else {
+        const current = select.value;
+        select.replaceChildren(...data.scopes.map((s) => el("option", { value: s.scope }, s.label)));
+        select.value = current;
+      }
+      decisionData = data;
+      renderDecisions();
+    } catch (e) {
+      $("decisions").replaceChildren(el("div", { class: "error" }, `加载失败：${e.message || e}`));
+    }
+  }
+
   async function refresh() {
     try {
       overview = await api.apiGet("overview");
@@ -421,15 +502,19 @@
 
   document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
-    for (const name of ["doctors", "groups", "diaries", "pending", "history", "reminders"]) {
+    for (const name of ["doctors", "groups", "diaries", "pending", "history", "reminders", "decisions"]) {
       $(`tab-${name}`).hidden = name !== tab.dataset.tab;
     }
     if (tab.dataset.tab === "history") loadHistory();
     if (tab.dataset.tab === "reminders") loadReminders();
+    if (tab.dataset.tab === "decisions") loadDecisions();
   }));
   for (const id of ["history-start", "history-end"]) $(id).addEventListener("change", loadHistory);
   window.addEventListener("resize", fitChat);
   $("history-reload").addEventListener("click", loadHistory);
+  for (const id of ["decision-scope", "decision-start", "decision-end"]) $(id).addEventListener("change", loadDecisions);
+  $("decision-outcome").addEventListener("change", renderDecisions);
+  $("decision-reload").addEventListener("click", loadDecisions);
   $("doctor-filter").addEventListener("input", renderDoctors);
   $("diary-filter").addEventListener("input", renderDiaries);
   $("diary-scope").addEventListener("change", loadDiaries);

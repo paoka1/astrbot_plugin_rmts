@@ -30,9 +30,12 @@ from .core.diary import (
 )
 from .core.history import History
 from .core.interject import (
+    DecisionLog,
+    Interjection,
     Interjector,
     Rule,
     build_prompt,
+    decision_of,
     parse_reply,
     parse_slots,
 )
@@ -40,6 +43,7 @@ from .core.memory import MemoryStore, cap_facts, render_memory_block, visible_fa
 from .core.nightly import LLM, next_run, run_nightly
 from .core.panel import (
     build_overview,
+    decisions_payload,
     diary_payload,
     history_payload,
     reminders_payload,
@@ -87,6 +91,7 @@ EXTRA_MEMORY = "rmts_memory"
 EXTRA_MENTIONED = "rmts_mentioned"
 SENT_WINDOW = 12 * 3600  # 注入最近多少秒内她主动发出的消息
 CHAT_WINDOW = 3 * 3600  # 群里被叫到时，附上最近多少秒内的群聊
+POKE_COOLDOWN = 60  # 同一个人连着戳，多少秒内只回第一次
 
 
 def scope_of(event: AstrMessageEvent) -> str:
@@ -138,6 +143,7 @@ class Main(Star):
         self.diaries = DiaryStore(DATA_DIR / "diaries")
         seed_history = not (DATA_DIR / "history").exists()
         self.history = History(DATA_DIR / "history")
+        self.decisions = DecisionLog(DATA_DIR / "interjections")
         if seed_history:
             # 首次启用交互记录时，把还没整理的当天记录先导入
             for scope in self.logs.scopes():
@@ -167,6 +173,8 @@ class Main(Star):
             int(config.get("interject_daily_limit", 5)),
         )
         self._interject_tasks: dict[str, asyncio.Task] = {}
+        # (作用域, QQ) → 上次回应戳一戳的时间
+        self._poke_replied: dict[tuple[str, str], float] = {}
         # WebUI 页面（views/memory）的数据接口
         for route, handler, methods, desc in (
             ("overview", self.api_overview, ["GET"], "记忆与日记概览"),
@@ -174,6 +182,7 @@ class Main(Star):
             ("consolidate", self.api_consolidate, ["POST"], "立即写日记并整理记忆"),
             ("history", self.api_history, ["GET"], "她和博士们的交互记录"),
             ("reminders", self.api_reminders, ["GET"], "所有定时提醒"),
+            ("interjections", self.api_interjections, ["GET"], "群里插话的每次判断"),
         ):
             context.register_web_api(f"/{PLUGIN_NAME}/{route}", handler, methods, desc)
 
@@ -358,6 +367,16 @@ class Main(Star):
         )
         return json_response({"status": "ok", "data": data})
 
+    async def api_interjections(self):
+        data = decisions_payload(
+            self.decisions,
+            self.memory,
+            request.query.get("scope", ""),
+            request.query.get("start", ""),
+            request.query.get("end", ""),
+        )
+        return json_response({"status": "ok", "data": data})
+
     async def api_reminders(self):
         data = reminders_payload(self.reminders, self.memory)
         return json_response({"status": "ok", "data": data})
@@ -517,6 +536,8 @@ Args:
         await asyncio.sleep(15)
         if self.interjector.spoke_since(scope, started):
             return
+        entries: list[LogEntry] = []
+        said = Interjection("")
         try:
             entries = self.logs.load(scope, int(time.time()))[1]
             prompt = build_prompt(
@@ -531,21 +552,29 @@ Args:
                 f"[rmts] 群 {scope} 插话意愿 {said.score}（阈值 {threshold}）："
                 f"{said.text or '不说'}"
             )
-            if not said.passes(threshold) or self.interjector.spoke_since(
-                scope, started
-            ):
-                return
-            # 她可以选择引用某条消息、@ 某位博士，或直接说
-            chain = MessageChain()
-            if said.reply_to:
-                chain.chain.append(Comp.Reply(id=said.reply_to.msg_id))
-            if said.at:
-                chain.at(said.at.name, said.at.qq).message(f" {said.text}")
+            if not said.text:
+                outcome = "不想说"
+            elif not said.passes(threshold):
+                outcome = "没达到阈值"
+            elif self.interjector.spoke_since(scope, started):
+                outcome = "她已经说过话"
             else:
-                chain.message(said.text)
-            await self.context.send_message(umo, chain)
+                # 她可以选择引用某条消息、@ 某位博士，或直接说
+                chain = MessageChain()
+                if said.reply_to:
+                    chain.chain.append(Comp.Reply(id=said.reply_to.msg_id))
+                if said.at:
+                    chain.at(said.at.name, said.at.qq).message(f" {said.text}")
+                else:
+                    chain.message(said.text)
+                await self.context.send_message(umo, chain)
+                outcome = "发出"
         except Exception as e:  # noqa: BLE001 — 插话失败只记日志
             logger.error(f"[rmts] 群 {scope} 插话失败: {e}")
+            outcome = f"出错：{e}"
+        # 每次判断都记下来，WebUI 里可以对照群聊看她为什么说、为什么不说
+        self.decisions.append(scope, decision_of(said, entries, threshold, outcome))
+        if outcome != "发出":
             return
         # 记下回的是谁，之后聊天和 WebUI 里都看得出她在接哪句话
         if said.reply_to:
@@ -904,6 +933,12 @@ Args:
     @filter.custom_filter(PokeMeFilter, False)  # raise_error 只能按位置传
     async def on_poked(self, event: AstrMessageEvent):
         user_id = event.get_sender_id()
+        # 连着戳只回第一次：一串相同的回应留在对话历史里，她会照着往下说
+        key = (scope_of(event), str(user_id))
+        now = time.time()
+        if now - self._poke_replied.get(key, 0) < POKE_COOLDOWN:
+            return
+        self._poke_replied[key] = now
         name = await self.nickname_of(event, user_id)
         text = random.choice(POKE_MSGS).format(name, user_id)
 

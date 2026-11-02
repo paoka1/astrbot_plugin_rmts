@@ -7,7 +7,7 @@ AstrBot 插件 `astrbot_plugin_rmts`（迷迭香工具箱）：为明日方舟�
 ## 目录
 
 - `main.py`：AstrBot 接入层。钩子、LLM 工具、WebUI 接口、夜间定时循环都在这里
-- `core/`：业务模块。`memory`（画像 / 群信息 / 可见性 / 迁移 / 注入文本）、`diary`（当日记录、抽样、日记存储与搜索）、`nightly`（写日记与整理）、`panel`（WebUI 数据汇总）、`persona`（人格同步判断）、`reminder`（定时提醒的重复规则与存储）、`history`（长期保留的交互记录，供 WebUI 查看）、`interject`（群里插话的唤醒规则和提示词）、`search`、`weather`
+- `core/`：业务模块。`memory`（画像 / 群信息 / 可见性 / 迁移 / 注入文本）、`diary`（当日记录、抽样、日记存储与搜索）、`nightly`（写日记与整理）、`panel`（WebUI 数据汇总）、`persona`（人格同步判断）、`reminder`（定时提醒的重复规则与存储）、`history`（长期保留的交互记录，供 WebUI 查看）、`interject`（群里插话的唤醒规则、提示词和每次判断的记录）、`search`、`weather`
 - `views/memory/index.html`：WebUI 插件页面
 - `persona/rosmontis.md`：配套人格提示词，插件启动时同步为人格「迷迭香（rmts）」
 - `resources/`：干员生日、档案、表情包

@@ -5,11 +5,14 @@ from datetime import date, datetime
 
 from .diary import DailyLog, DiaryStore, is_proactive
 from .history import History
+from .interject import DecisionLog
 from .memory import Fact, MemoryStore, total_length
 from .reminder import ReminderStore, repeat_label
 
 # 交互记录一次最多返回多少条，更早的要缩小时间范围再查
 HISTORY_LIMIT = 500
+# 插话判断一次最多返回多少条，每条带着当时的群聊，比交互记录大得多
+DECISION_LIMIT = 200
 
 
 def _facts_payload(facts: list[Fact], max_length: int) -> dict:
@@ -121,6 +124,25 @@ def history_payload(
         ],
         "truncated": truncated,
         "limit": HISTORY_LIMIT,
+    }
+
+
+def decisions_payload(
+    log: DecisionLog, memory: MemoryStore, scope: str, start: str, end: str
+) -> dict:
+    scopes = [{"scope": s, "label": _scope_label(s, memory)} for s in log.scopes()]
+    # 只认已存在的作用域，避免查询参数拼出数据目录外的路径
+    if scope in {s["scope"] for s in scopes}:
+        rows, truncated = log.query(
+            scope, _parse_day(start), _parse_day(end), DECISION_LIMIT
+        )
+    else:
+        rows, truncated = [], False
+    return {
+        "scopes": scopes,
+        "decisions": [{**asdict(d), "time": _time(d.ts)} for d in rows],
+        "truncated": truncated,
+        "limit": DECISION_LIMIT,
     }
 
 

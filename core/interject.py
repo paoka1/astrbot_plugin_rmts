@@ -1,8 +1,10 @@
 """群里插话：按新消息条数和时间间隔决定什么时候唤醒她看看群聊，以及唤醒时给她看的内容。"""
 
+import json
 import re
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from .diary import DiaryStore, LogEntry
 from .memory import Fact, MemoryStore, cap_facts, visible_facts
@@ -11,9 +13,10 @@ PASS = "不说"
 CONTEXT_SIZE = 40  # 唤醒时给她看最近多少条群消息
 MAX_PEOPLE = 5  # 附上最近说话的几位博士的记事
 
-INTERJECT_TASK = f"""上面是群里最近的聊天，没有人在叫你。你在一旁看着，大多数时候并不想插话。
-先想想你此刻有多想开口，写成 0 到 1 之间的一个数：0 是完全不想，1 是非常想。有人叫你、找你、问起你时会很高；有人需要关心、你知道一个还没人回答的问题的答案时也会高一些；听不懂的、拿不准的、带性暗示的会很低。
+INTERJECT_TASK = f"""上面是群里最近的聊天，没有人在叫你。你在一旁看着，想说什么就可以说：接一句话、关心一下谁、说说自己的想法都行；大家聊到你、聊到你认识的人或在乎的事时，更可以大方开口。
+先想想你此刻有多想开口，写成 0 到 1 之间的一个数：0 是完全不想，1 是非常想。
 第一行只写这个数。第二行写你想说的话，以迷迭香的口吻，一到三句，接住某个人的某句话；可以在话前面加标记：[回复3] 引用第 3 条消息，[@QQ号] @ 某位博士，接较早的话时用标记说清在回哪句。实在没什么想说的，第二行写：{PASS}
+第三行以“理由：”开头，用一句话说说为什么想说或不想说，这一行不会发到群里。
 这时你只能说话，用不了终端上的其他功能。"""
 
 
@@ -192,6 +195,7 @@ class Interjection:
     score: float | None = None  # 她自己估的开口意愿，0～1；没写时为 None
     reply_to: LogEntry | None = None  # 引用回复的那条消息
     at: LogEntry | None = None  # @ 这条消息的发送者
+    reason: str = ""  # 她说的为什么想说或不想说，只记下来，不发出去
 
     def passes(self, threshold: float) -> bool:
         return bool(self.text) and self.score is not None and self.score >= threshold
@@ -199,12 +203,14 @@ class Interjection:
 
 # 开头的意愿分数，允许写成「意愿：0.6」
 _SCORE = re.compile(r"\s*(?:意愿\s*[:：]?\s*)?(1(?:\.0+)?|0?\.\d+|0)(?![\d.])")
+# 最后一行的理由
+_REASON = re.compile(r"(?:^|\n)\s*理由\s*[:：]\s*(.*?)\s*$", re.DOTALL)
 # [回复n]、[@QQ号]；她有时会写成 [@名字]，也认
 _MARK = re.compile(r"\s*\[\s*(?:回复\s*#?\s*(\d+)|@\s*([^\]]+?))\s*\]")
 
 
 def parse_reply(reply: str, entries: list[LogEntry]) -> Interjection:
-    """拆出开头的意愿分数和 [回复n]、[@QQ号] 标记；选择不说时 text 为空。
+    """拆出开头的意愿分数、最后的理由和 [回复n]、[@QQ号] 标记；选择不说时 text 为空。
 
     编号对应 build_prompt 里给她看的最近 CONTEXT_SIZE 条消息。只能引用别人带消息 ID 的话，
     只能 @ 这段群聊里说过话的人，不合规的标记直接丢掉。
@@ -215,6 +221,9 @@ def parse_reply(reply: str, entries: list[LogEntry]) -> Interjection:
     if m := _SCORE.match(text):
         result.score = float(m[1])
         text = text[m.end() :].strip()
+    if m := _REASON.search(text):
+        result.reason = m[1]
+        text = text[: m.start()].strip()
     while m := _MARK.match(text):
         text = text[m.end() :]
         if m.group(1):
@@ -239,3 +248,87 @@ def parse_reply(reply: str, entries: list[LogEntry]) -> Interjection:
     if text.strip('。.！!…"“”「」') not in ("", PASS):
         result.text = text
     return result
+
+
+@dataclass
+class Decision:
+    """一次插话判断，供 WebUI 对照着看：给她看的群聊、她的打分、想说的话和理由。"""
+
+    ts: int
+    threshold: float
+    outcome: str  # 发出 / 没达到阈值 / 不想说 / 她已经说过话 / 出错：……
+    score: float | None = None
+    text: str = ""
+    reason: str = ""
+    reply_to: int = 0  # 引用了 context 里的第几条，0 表示没引用
+    at: str = ""  # @ 的人，「名字(QQ)」
+    context: list[dict] = field(default_factory=list)
+
+
+def decision_of(
+    said: Interjection, entries: list[LogEntry], threshold: float, outcome: str
+) -> Decision:
+    """把这次给她看的群聊（编号与提示词一致）和她的回答整理成一条记录。"""
+    recent = entries[-CONTEXT_SIZE:]
+    return Decision(
+        ts=int(datetime.now().timestamp()),
+        threshold=threshold,
+        outcome=outcome,
+        score=said.score,
+        text=said.text,
+        reason=said.reason,
+        reply_to=recent.index(said.reply_to) + 1 if said.reply_to else 0,
+        at=f"{said.at.name}({said.at.qq})" if said.at else "",
+        context=[
+            {
+                "n": n,
+                "time": datetime.fromtimestamp(e.ts).strftime("%H:%M"),
+                "name": e.name,
+                "qq": e.qq,
+                "text": e.text,
+                "is_self": e.is_self,
+            }
+            for n, e in enumerate(recent, 1)
+        ],
+    )
+
+
+class DecisionLog:
+    """每次插话判断的记录。按作用域、按月分文件（`<scope>/<YYYY-MM>.jsonl`），只追加。"""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True)
+
+    def append(self, scope: str, decision: Decision) -> None:
+        folder = self.root / scope
+        folder.mkdir(exist_ok=True)
+        month = datetime.fromtimestamp(decision.ts).strftime("%Y-%m")
+        with (folder / f"{month}.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(asdict(decision), ensure_ascii=False) + "\n")
+
+    def scopes(self) -> list[str]:
+        return sorted(p.name for p in self.root.iterdir() if p.is_dir())
+
+    def query(
+        self, scope: str, start: date | None, end: date | None, limit: int
+    ) -> tuple[list[Decision], bool]:
+        """按时间倒序返回，起止日期都包含在内；第二项表示是否被截断。"""
+        first = start.strftime("%Y-%m") if start else ""
+        last = end.strftime("%Y-%m") if end else "9999-99"
+        rows: list[Decision] = []
+        for path in (self.root / scope).glob("*.jsonl"):
+            if not first <= path.stem <= last:
+                continue
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        d = Decision(**json.loads(line))
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    day = datetime.fromtimestamp(d.ts).date()
+                    if (start and day < start) or (end and day > end):
+                        continue
+                    rows.append(d)
+        rows.sort(key=lambda d: d.ts, reverse=True)
+        return rows[:limit], len(rows) > limit

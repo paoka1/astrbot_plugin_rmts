@@ -3,9 +3,11 @@ from datetime import datetime, timedelta
 import pytest
 from rmts.core.diary import DiaryEntry, DiaryStore, LogEntry
 from rmts.core.interject import (
+    DecisionLog,
     Interjector,
     Rule,
     build_prompt,
+    decision_of,
     parse_reply,
     parse_slots,
 )
@@ -98,6 +100,11 @@ def test_parse_reply():
     said = parse_reply("0.75\n[回复1] 考试加油", entries)
     assert said.score == 0.75 and said.reply_to.msg_id == "m1"
     assert said.passes(0.6) and not said.passes(0.8)
+    # 最后一行的理由单独拿出来，不混进要发的话
+    said = parse_reply("0.3\n考试加油\n理由：小明在紧张", entries)
+    assert said.text == "考试加油" and said.reason == "小明在紧张"
+    said = parse_reply("0.1\n不说\n理由: 没听懂", entries)
+    assert said.text == "" and said.reason == "没听懂"
     assert parse_reply("意愿：1\n好", entries).score == 1.0
     assert parse_reply(".3 好", entries).score == 0.3
     # 「10 点了」不是分数
@@ -112,6 +119,26 @@ def test_parse_reply():
     for marker in ["[回复9]", "[回复2]", "[回复3]", "[@99]", "[@不在群里的人]"]:
         said = parse_reply(f"{marker} 你好", entries)
         assert said.text == "你好" and not said.reply_to and not said.at
+
+
+def test_decision_of(tmp_path):
+    entries = [LogEntry(i, "41", "旧消息", "早") for i in range(50)] + [
+        LogEntry(100, "42", "小明", "明天考试", msg_id="m1"),
+        LogEntry(101, "bot", "迷迭香", "加油", is_self=True),
+    ]
+    said = parse_reply("0.7\n[回复39][@42] 考试别紧张\n理由：小明要考试", entries)
+    d = decision_of(said, entries, 0.5, "发出")
+    # 编号和提示词里一样，只算最近 40 条
+    assert len(d.context) == 40 and d.context[38]["text"] == "明天考试"
+    assert d.reply_to == 39 and d.at == "小明(42)"
+    assert (d.score, d.text, d.reason) == (0.7, "考试别紧张", "小明要考试")
+    assert d.context[39]["is_self"]
+
+    log = DecisionLog(tmp_path)
+    log.append("123", d)
+    rows, truncated = log.query("123", None, None, 10)
+    assert rows == [d] and not truncated
+    assert log.query("456", None, None, 10) == ([], False)
 
 
 def test_slots():

@@ -70,6 +70,8 @@ def ask(
     sent = said.passes(threshold)
     verdict = "发出" if sent else "不发"
     print(f"  → 意愿 {said.score}（阈值 {threshold}），{verdict}")
+    if said.reason:
+        print(f"  → 理由：{said.reason}")
     if not said.text:
         print("  → 不说")
         return False
