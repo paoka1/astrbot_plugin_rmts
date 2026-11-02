@@ -1,7 +1,7 @@
 # astrbot_plugin_rmts · 迷迭香工具箱
 
-为 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 提供一组 function calling 工具，配合明日方舟「迷迭香」角色人格使用。
-功能移植自作者的 NoneBot2 机器人 [rmts_bot](https://github.com/paoka1/rmts_bot)。
+为 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 准备的明日方舟「迷迭香」插件：附带依据官方资料编写的人格，并提供一组 function calling 工具。她记得每位博士说过的事，每晚写日记，在群里被叫到时看得懂前面在聊什么。
+最初移植自作者的 NoneBot2 机器人 [rmts_bot](https://github.com/paoka1/rmts_bot)。各版本的改动见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 功能
 
