@@ -249,36 +249,31 @@ def render_memory_block(
     diaries: list[tuple[str, str]],
     chat: list[str],
 ) -> str:
-    # 群聊不是终端上的记事，单独成段；没有记事时也照样附上
-    chat_lines = ["【群里最近的聊天】（你被叫到之前）", *chat] if chat else []
-    if speaker is None and not (
-        speaker_facts or mentioned or group_facts or sent or diaries
-    ):
-        return "\n".join(chat_lines)
-
     def lines_for(profile: Profile | None, facts: list[Fact]) -> list[str]:
         lines = (
             [f"印象：{profile.impression}"] if profile and profile.impression else []
         )
         lines.extend(f"#{f.id} {f.text}（{f.date or '很久以前'}）" for f in facts)
-        return lines or ["（还没有记录）"]
+        return lines
 
-    lines = [
-        "【迷迭香终端上的记事】",
-        f"正在说话的博士 {speaker_name}({speaker_qq})：",
-        *lines_for(speaker, speaker_facts),
+    sections = [
+        (
+            f"正在说话的博士 {speaker_name}({speaker_qq})：",
+            lines_for(speaker, speaker_facts),
+        ),
+        *(
+            (f"话里提到的博士 {profile.name}({qq})：", lines_for(profile, facts))
+            for qq, profile, facts in mentioned
+        ),
+        ("本群记录：", lines_for(None, group_facts)),
+        ("最近你在这里主动发出的消息：", [f"{at}：{text}" for at, text in sent]),
+        ("最近的日记：", [f"{day}：{text}" for day, text in diaries]),
     ]
-    for qq, profile, facts in mentioned:
-        lines.extend(
-            [f"话里提到的博士 {profile.name}({qq})：", *lines_for(profile, facts)]
-        )
-    if group_facts:
-        lines.extend(["本群记录：", *lines_for(None, group_facts)])
-    if sent:
-        lines.extend(
-            ["最近你在这里主动发出的消息：", *(f"{at}：{text}" for at, text in sent)]
-        )
-    if diaries:
-        lines.extend(["最近的日记：", *(f"{day}：{text}" for day, text in diaries)])
-    lines.extend(chat_lines)
+    # 没有记事的人不单列一段，否则她会特意说「终端上没有你的记事」，像不认识对方
+    lines = [line for title, body in sections if body for line in (title, *body)]
+    if lines:
+        lines.insert(0, "【迷迭香终端上的记事】")
+    # 群聊不是终端上的记事，单独成段
+    if chat:
+        lines.extend(["【群里最近的聊天】（你被叫到之前）", *chat])
     return "\n".join(lines)

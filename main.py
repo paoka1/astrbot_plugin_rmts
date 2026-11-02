@@ -20,7 +20,14 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import json_response, request
 from astrbot.core.agent.message import TextPart
 
-from .core.diary import DailyLog, DiaryStore, LogEntry, keep_text, recent_chat
+from .core.diary import (
+    DailyLog,
+    DiaryStore,
+    LogEntry,
+    keep_text,
+    message_text,
+    recent_chat,
+)
 from .core.history import History
 from .core.interject import (
     Interjector,
@@ -89,10 +96,19 @@ def scope_of(event: AstrMessageEvent) -> str:
 
 
 def text_of(event: AstrMessageEvent) -> str:
-    """只取原消息的文本段，图片、引用和表情等不作为记录素材。"""
-    return "".join(
-        c.text for c in event.get_messages() if isinstance(c, Comp.Plain)
-    ).strip()
+    """只取原消息的文本段和 @，图片、引用和表情等不作为记录素材。"""
+    parts = []
+    for c in event.get_messages():
+        if isinstance(c, Comp.Plain):
+            parts.append(("", c.text))
+        elif isinstance(c, Comp.At):
+            parts.append((str(c.qq), c.name or ""))
+    return message_text(parts, str(event.get_self_id()))
+
+
+def sender_name(event: AstrMessageEvent) -> str:
+    """被戳时用取到的昵称，戳一戳事件的发送者名字只是 QQ 号。"""
+    return event.get_extra(EXTRA_POKE) or event.get_sender_name()
 
 
 class PokeMeFilter(CustomFilter):
@@ -555,7 +571,7 @@ Args:
             LogEntry(
                 int(time.time()),
                 str(event.get_sender_id()),
-                event.get_sender_name(),
+                sender_name(event),
                 text,
                 to_her=to_her,
                 msg_id=str(event.message_obj.message_id or ""),
@@ -620,7 +636,7 @@ Args:
                         break
         block = render_memory_block(
             speaker_qq=speaker_qq,
-            speaker_name=event.get_sender_name(),
+            speaker_name=sender_name(event),
             speaker=speaker,
             speaker_facts=facts,
             mentioned=mentioned,
@@ -682,7 +698,7 @@ Args:
             info,
             scope=scope_of(event),
             today=date.today().isoformat(),
-            name=event.get_sender_name(),
+            name=sender_name(event),
         )
         return "已悄悄记下"
 
@@ -738,7 +754,7 @@ Args:
                 info,
                 scope=scope,
                 today=today,
-                name=event.get_sender_name(),
+                name=sender_name(event),
             )
         return "已悄悄记下"
 
@@ -827,7 +843,7 @@ Args:
                 scope=scope_of(event),
                 umo=event.unified_msg_origin,
                 qq=str(event.get_sender_id()),
-                name=event.get_sender_name(),
+                name=sender_name(event),
                 at=at,
                 repeat=repeat,
                 text=text,
@@ -888,9 +904,8 @@ Args:
     @filter.custom_filter(PokeMeFilter, False)  # raise_error 只能按位置传
     async def on_poked(self, event: AstrMessageEvent):
         user_id = event.get_sender_id()
-        text = random.choice(POKE_MSGS).format(
-            await self.nickname_of(event, user_id), user_id
-        )
+        name = await self.nickname_of(event, user_id)
+        text = random.choice(POKE_MSGS).format(name, user_id)
 
         # 接着当前对话聊，人设、历史和工具都和普通消息一样
         umo = event.unified_msg_origin
@@ -901,7 +916,8 @@ Args:
         conversation = await conv_mgr.get_conversation(umo, cid)
 
         event.set_extra(EXTRA_PREFIXED, True)
-        event.set_extra(EXTRA_POKE, True)
+        # 戳一戳事件的发送者名字就是 QQ 号，存下昵称供记录和记事块使用
+        event.set_extra(EXTRA_POKE, name)
         yield event.request_llm(prompt=text, conversation=conversation)
 
     @filter.on_decorating_result()
@@ -927,9 +943,13 @@ Args:
     @filter.on_llm_request()
     async def add_sender_info(self, event: AstrMessageEvent, req: ProviderRequest):
         """在消息前拼上博士的名字和 QQ 号（rmts 的「博士（TA的名字是…）对你说：…」）"""
-        if not self.config.get("sender_info_enabled", True) or event.get_extra(
-            EXTRA_PREFIXED
-        ):
+        if event.get_extra(EXTRA_PREFIXED):
+            return
+        # AstrBot 拼的 prompt 会丢掉句中 @ 她的那段（「去和 @迷迭香 交朋友」只剩「去和交朋友」），
+        # 消息里有 @ 时换成按原顺序拼出的文字
+        if any(isinstance(c, Comp.At) for c in event.get_messages()):
+            req.prompt = text_of(event) or req.prompt
+        if not self.config.get("sender_info_enabled", True):
             return
         event.set_extra(EXTRA_PREFIXED, True)
         prefix = f"博士（TA的名字是：{event.get_sender_name()}，TA的ID是{event.get_sender_id()}）"

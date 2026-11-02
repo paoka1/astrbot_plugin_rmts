@@ -6,6 +6,7 @@ from rmts.core.diary import (
     DiaryStore,
     LogEntry,
     keep_text,
+    message_text,
     recent_chat,
     sample_for_diary,
 )
@@ -61,6 +62,16 @@ def test_log_cap(tmp_path):
     for ts in range(6, 30):
         logs.append("1", "umo", LogEntry(ts, "42", "a", "内容"))
     assert len((tmp_path / "1.jsonl").read_text(encoding="utf-8").splitlines()) <= 6
+
+
+def test_message_text():
+    me = "999"
+    # 开头叫她的 @ 去掉，句中 @ 她写成「@你」，@ 别人保留名字
+    parts = [("888", "小鲸鱼"), ("", "去和"), (me, "迷迭香"), ("", "交个朋友")]
+    assert message_text(parts, me) == "@小鲸鱼(888) 去和 @你 交个朋友"
+    assert message_text([(me, "迷迭香"), (me, "迷迭香"), ("", " 在吗 ")], me) == "在吗"
+    assert message_text([("", "问问"), ("777", "")], me) == "问问 @777"
+    assert message_text([(me, "迷迭香")], me) == ""
 
 
 def test_recent_chat():

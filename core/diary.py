@@ -13,6 +13,25 @@ def keep_text(text: str, to_her: bool) -> bool:
     return bool(text) and (to_her or len(text) >= MIN_TEXT_LEN)
 
 
+def message_text(parts: list[tuple[str, str]], self_id: str) -> str:
+    """把消息里的文字和 @ 按原顺序拼成一句话。
+
+    parts 为 (QQ, 文字)：文字段 QQ 为空；@ 段的文字是对方的名字，可能为空。
+    @ 别人写成「@名字(QQ号)」，她用工具时要用到 QQ 号；开头用来叫她的 @ 去掉，
+    句中 @ 她的写成「@你」，免得听成在叫别人。
+    """
+    words = []
+    for qq, text in parts:
+        if not qq:
+            words.append(text.strip())
+        elif qq == self_id:
+            if any(words):
+                words.append("@你")
+        else:
+            words.append(f"@{text}({qq})" if text else f"@{qq}")
+    return " ".join(w for w in words if w)
+
+
 @dataclass
 class LogEntry:
     ts: int

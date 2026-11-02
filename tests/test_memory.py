@@ -191,7 +191,9 @@ def test_render_memory_block():
         "chat": [],
     }
     assert render_memory_block(**args) == ""
-    # 没有记事时只给群聊，不出现「还没有记录」
+    # 有画像但没有可见的事实，也不单列一段
+    assert render_memory_block(**{**args, "speaker": Profile(name="小明")}) == ""
+    # 没有记事时只给群聊
     chat_only = render_memory_block(**{**args, "chat": ["14:20 小明(42)：在吗"]})
     assert chat_only == "【群里最近的聊天】（你被叫到之前）\n14:20 小明(42)：在吗"
     args.update(
@@ -204,6 +206,7 @@ def test_render_memory_block():
         chat=["14:20 小红(43)：今天好累"],
     )
     block = render_memory_block(**args)
+    assert "话里提到的博士" not in block
     assert block.endswith(
         "【群里最近的聊天】（你被叫到之前）\n14:20 小红(43)：今天好累"
     )
