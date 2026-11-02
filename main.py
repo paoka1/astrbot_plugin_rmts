@@ -77,6 +77,7 @@ POKE_MSGS = [
 EXTRA_PREFIXED = "rmts_prefixed"
 EXTRA_POKE = "rmts_poke"
 EXTRA_MEMORY = "rmts_memory"
+EXTRA_MENTIONED = "rmts_mentioned"
 SENT_WINDOW = 12 * 3600  # 注入最近多少秒内她主动发出的消息
 
 
@@ -891,17 +892,22 @@ Args:
         yield event.request_llm(prompt=text, conversation=conversation)
 
     @filter.on_decorating_result()
-    async def mention_poker(self, event: AstrMessageEvent):
-        """群里被戳时，回复前 @ 戳的人"""
+    async def mention_sender(self, event: AstrMessageEvent):
+        """群里回复时引用对方的消息并 @ 对方；被戳时没有消息可引用，只 @。
+        一次唤醒发出多条时只处理第一条，免得连着 @ 同一个人"""
         result = event.get_result()
         if (
-            event.get_extra(EXTRA_POKE)
-            and event.get_group_id()
-            and result
-            and result.chain
+            not event.get_group_id()
+            or not result
+            or not result.chain
+            or event.get_extra(EXTRA_MENTIONED)
         ):
-            result.chain.insert(0, Comp.At(qq=event.get_sender_id()))
-            result.chain.insert(1, Comp.Plain(" "))
+            return
+        event.set_extra(EXTRA_MENTIONED, True)
+        head = [Comp.At(qq=event.get_sender_id()), Comp.Plain(" ")]
+        if not event.get_extra(EXTRA_POKE):
+            head.insert(0, Comp.Reply(id=event.message_obj.message_id))
+        result.chain[:0] = head
 
     # ---------- 博士信息 ----------
 
