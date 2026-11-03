@@ -7,7 +7,7 @@ desc: |
   群里被叫到时会读最近的群聊，回复时引用并 @ 对方，没人叫她时也会自己决定要不要插话；
   工具：干员生日 / 档案、高德天气、DeepSeek 网页搜索、定时提醒、表情包、戳一戳；
   WebUI 页面可查看画像、日记、交互记录和提醒。
-version: 1.3.0
+version: 1.3.1
 author: paoka1
 repo: https://github.com/paoka1/astrbot_plugin_rmts
 astrbot_version: ">=4.29"

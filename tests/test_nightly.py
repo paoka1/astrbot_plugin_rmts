@@ -261,3 +261,34 @@ def test_cancel_keeps_log_and_completed_diary(tmp_path):
         assert not list(tmp_path.rglob("*.tmp"))
 
     asyncio.run(scenario())
+
+
+def test_run_nightly_skips_scopes_not_allowed(tmp_path):
+    async def scenario():
+        logs, diaries = DailyLog(tmp_path / "logs"), DiaryStore(tmp_path / "diaries")
+        for scope in ("in", "out"):
+            logs.append(scope, scope, LogEntry(CUTOFF - 1, "42", "a", "普通群聊"))
+
+        async def make_llm(umo):
+            async def llm(system, prompt):
+                return DIARY
+
+            return llm
+
+        async def persona_for(umo):
+            return "人格"
+
+        failures = await run_nightly(
+            memory=MemoryStore(tmp_path),
+            logs=logs,
+            diaries=diaries,
+            make_llm=make_llm,
+            persona_for=persona_for,
+            run_at=RUN_AT,
+            budget=20000,
+            allowed=lambda scope, umo: scope == "in",
+        )
+        assert failures == {} and logs.scopes() == ["out"]
+        assert diaries.latest("in", 1) and not diaries.latest("out", 1)
+
+    asyncio.run(scenario())

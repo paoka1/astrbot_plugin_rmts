@@ -119,6 +119,10 @@ def test_parse_reply():
     for marker in ["[回复9]", "[回复2]", "[回复3]", "[@99]", "[@不在群里的人]"]:
         said = parse_reply(f"{marker} 你好", entries)
         assert said.text == "你好" and not said.reply_to and not said.at
+    # 话中间的标记不生效，也不留在要发的话里
+    said = parse_reply("0.4\n[回复1] 考试加油[回复3] [@43] 你也是", entries)
+    assert said.reply_to.msg_id == "m1" and not said.at
+    assert said.text == "考试加油 你也是"
 
 
 def test_decision_of(tmp_path):

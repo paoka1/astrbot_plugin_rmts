@@ -7,7 +7,7 @@ AstrBot 插件 `astrbot_plugin_rmts`（迷迭香工具箱）：为明日方舟�
 ## 目录
 
 - `main.py`：AstrBot 接入层。钩子、LLM 工具、WebUI 接口、夜间定时循环都在这里
-- `core/`：业务模块。`memory`（画像 / 群信息 / 可见性 / 迁移 / 注入文本）、`diary`（当日记录、抽样、日记存储与搜索）、`nightly`（写日记与整理）、`panel`（WebUI 数据汇总）、`persona`（人格同步判断）、`reminder`（定时提醒的重复规则与存储）、`history`（长期保留的交互记录，供 WebUI 查看）、`interject`（群里插话的唤醒规则、提示词和每次判断的记录）、`search`、`weather`
+- `core/`：业务模块。`access`（沿用 AstrBot 访问控制的白名单）、`memory`（画像 / 群信息 / 可见性 / 迁移 / 注入文本）、`diary`（当日记录、抽样、日记存储与搜索）、`nightly`（写日记与整理）、`panel`（WebUI 数据汇总）、`persona`（人格同步判断）、`reminder`（定时提醒的重复规则与存储）、`history`（长期保留的交互记录，供 WebUI 查看）、`interject`（群里插话的唤醒规则、提示词和每次判断的记录）、`search`、`weather`
 - `views/memory/index.html`：WebUI 插件页面
 - `persona/rosmontis.md`：配套人格提示词，插件启动时同步为人格「迷迭香（rmts）」
 - `resources/`：干员生日、档案、表情包
@@ -33,7 +33,7 @@ uv run ruff format --check .
 
 ## 约定
 
-- `core/` 里的 memory、diary、nightly、panel、persona、reminder、history、interject **不能 import astrbot**，以便本地测试；模块之间用相对导入。测试通过 `tests/conftest.py` 把仓库根注册为包 `rmts`，写成 `from rmts.core.memory import ...`
+- `core/` 里的 access、memory、diary、nightly、panel、persona、reminder、history、interject **不能 import astrbot**，以便本地测试；模块之间用相对导入。测试通过 `tests/conftest.py` 把仓库根注册为包 `rmts`，写成 `from rmts.core.memory import ...`
 - 中文注释，日志前缀 `[rmts]`；工具的使用规则写在工具 docstring 里（`Args:` 段的类型写法如 `array[string]`、`number`）
 - JSON 写入用「写 `.tmp` 再 `replace`」原子落盘；当日记录是 JSONL 追加写
 - 记录消息一律走 `main.py` 的 `_log`：同时写当日记录（夜间整理后清掉）和交互记录（只留对她说的、她说的，长期保留）
@@ -46,6 +46,7 @@ uv run ruff format --check .
 - **来源由代码计算，不交给模型**：新增为当前作用域；更新后换成当前作用域；合并时含私聊即为私聊，否则取交集（交集为空只有本人可用）
 - 群作用域的夜间整理，模型输入里不能出现私聊事实；对私聊事实的操作一律忽略
 - 群消息监听不能 `stop_event()` 或 `yield` 结果
+- 新增钩子或后台任务（按作用域运行的）要先过 `main.py` 的 `_allowed` / `_event_allowed`：不在 AstrBot 白名单里的会话不触发插件的功能
 - 不改动 `req.system_prompt`：每次请求都会变的内容（记事、时间等）一律放进临时的用户消息内容
 - 夜间整理任一步失败都不删当天记录；同一天再次整理时续写当天日记，不覆盖
 - 人格同步只管「迷迭香（rmts）」这一份：用户改过（内容既不是新版也不是插件上次写入的）就不覆盖；不改其他人格，不切换默认人格

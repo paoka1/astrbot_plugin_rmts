@@ -241,12 +241,14 @@ async def run_nightly(
     persona_for: Callable[[str], Awaitable[str]],
     run_at: datetime,
     budget: int,
+    allowed: Callable[[str, str], bool] = lambda scope, umo: True,
 ) -> dict[str, str]:
+    """allowed(scope, umo) 为假的作用域（不在白名单里）跳过，当天记录原样留着。"""
     failures = {}
     for scope in logs.scopes():
         try:
             umo, entries = logs.load(scope, int(run_at.timestamp()))
-            if not umo or not entries:
+            if not umo or not entries or not allowed(scope, umo):
                 continue
             await process_scope(
                 scope,

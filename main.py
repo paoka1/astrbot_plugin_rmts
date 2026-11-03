@@ -20,6 +20,7 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import json_response, request
 from astrbot.core.agent.message import TextPart
 
+from .core.access import allowed
 from .core.diary import (
     DailyLog,
     DiaryStore,
@@ -239,6 +240,19 @@ class Main(Star):
         persona = await self.context.persona_manager.get_default_persona_v3(umo)
         return persona["prompt"]
 
+    def _allowed(self, scope: str, umo: str) -> bool:
+        # 沿用 AstrBot 访问控制的白名单：不在名单里的会话不触发插件的功能
+        cfg = self.context.get_config(umo)
+        return allowed(
+            cfg.get("platform_settings", {}),
+            cfg.get("admins_id", []),
+            scope=scope,
+            umo=umo,
+        )
+
+    def _event_allowed(self, event: AstrMessageEvent) -> bool:
+        return self._allowed(scope_of(event), event.unified_msg_origin)
+
     async def _consolidate(self, trigger: str) -> None:
         async with self._consolidate_lock:
             run_at = datetime.now()
@@ -252,6 +266,7 @@ class Main(Star):
                     persona_for=self._persona_for,
                     run_at=run_at,
                     budget=int(self.config.get("diary_input_max_chars", 20000)),
+                    allowed=self._allowed,
                 )
                 for scope, reason in failures.items():
                     logger.error(
@@ -290,6 +305,9 @@ class Main(Star):
                     logger.error(f"[rmts] 发送提醒 #{r.id} 失败: {e}")
 
     async def _fire_reminder(self, r: Reminder) -> None:
+        if not self._allowed(r.scope, r.umo):
+            logger.warning(f"[rmts] 提醒 #{r.id} 所在会话不在白名单里，不发送")
+            return
         text = r.text
         if r.compose:
             weather = ""
@@ -500,6 +518,9 @@ Args:
     async def record_group_message(self, event: AstrMessageEvent):
         if str(event.get_sender_id()) == str(event.get_self_id()):
             return
+        # 管理员豁免时 AstrBot 会放行非白名单群的消息，群里的记录和插话不跟着开启
+        if not self._event_allowed(event):
+            return
         text = text_of(event)
         if keep_text(text, False):
             self._record_message(event, text)
@@ -611,6 +632,13 @@ Args:
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest):
         if event.get_extra(EXTRA_MEMORY):
             return
+        if not self._event_allowed(event):
+            # 管理员豁免时 AstrBot 会放行非白名单会话的消息，插件的工具也不给她用
+            if req.func_tool:
+                for tool in list(req.func_tool.tools):
+                    if getattr(tool, "handler_module_path", None) == __name__:
+                        req.func_tool.remove_tool(tool.name)
+            return
         event.set_extra(EXTRA_MEMORY, True)
         scope = scope_of(event)
         speaker_qq = str(event.get_sender_id())
@@ -696,7 +724,7 @@ Args:
     @filter.on_llm_response()
     async def record_reply(self, event: AstrMessageEvent, resp: LLMResponse | None):
         text = (resp.completion_text or "").strip() if resp else ""
-        if text:
+        if text and self._event_allowed(event):
             self._log(
                 scope_of(event),
                 event.unified_msg_origin,
@@ -932,6 +960,8 @@ Args:
 
     @filter.custom_filter(PokeMeFilter, False)  # raise_error 只能按位置传
     async def on_poked(self, event: AstrMessageEvent):
+        if not self._event_allowed(event):
+            return
         user_id = event.get_sender_id()
         # 连着戳只回第一次：一串相同的回应留在对话历史里，她会照着往下说
         key = (scope_of(event), str(user_id))
@@ -962,6 +992,7 @@ Args:
         result = event.get_result()
         if (
             not event.get_group_id()
+            or not self._event_allowed(event)
             or not result
             or not result.chain
             or event.get_extra(EXTRA_MENTIONED)
@@ -978,7 +1009,7 @@ Args:
     @filter.on_llm_request()
     async def add_sender_info(self, event: AstrMessageEvent, req: ProviderRequest):
         """在消息前拼上博士的名字和 QQ 号（rmts 的「博士（TA的名字是…）对你说：…」）"""
-        if event.get_extra(EXTRA_PREFIXED):
+        if event.get_extra(EXTRA_PREFIXED) or not self._event_allowed(event):
             return
         # AstrBot 拼的 prompt 会丢掉句中 @ 她的那段（「去和 @迷迭香 交朋友」只剩「去和交朋友」），
         # 消息里有 @ 时换成按原顺序拼出的文字
